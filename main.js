@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, shell, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, session, shell, ipcMain, dialog, Menu } = require("electron");
 const net = require("net");
 const path = require("path");
 const { autoUpdater } = require("electron-updater");
@@ -226,6 +226,27 @@ ipcMain.handle("re-login", async () => {
   clearCredentials(DATA_DIR);
   if (mainWindow) { mainWindow.close(); mainWindow = null; }
   await beginAuthFlow();
+});
+
+// Pop up the native macOS share sheet (AirDrop, Messages, Mail, Notes, etc.)
+// anchored to the mouse position. macOS-only; returns false on other platforms
+// so the renderer can fall back to clipboard copy.
+ipcMain.handle("share-url", (event, { url, title, text }) => {
+  if (process.platform !== "darwin") return false;
+
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+
+  const sharingItem = { urls: [url] };
+  // Bundle title + text as a single text payload so Messages/Notes include it
+  const combined = [title, text].filter(Boolean).join("\n").trim();
+  if (combined) sharingItem.texts = [combined];
+
+  const menu = Menu.buildFromTemplate([
+    { label: "Share…", role: "shareMenu", sharingItem },
+  ]);
+  menu.popup({ window: win });
+  return true;
 });
 
 // --- Auto-update ---

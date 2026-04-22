@@ -1,6 +1,6 @@
 // --- Card building: HTML generation & action buttons ---
 
-import { escapeHtml, DL_ICON, COPY_ICON } from './helpers.js';
+import { escapeHtml, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { buildMediaHtml, downloadImage, copyImageToClipboard, bookmarkFilename, mediaDownloadUrl, triggerAnchorDownload, bookmarksToZip } from './media.js';
 import { state } from './state.js';
 
@@ -115,9 +115,71 @@ export const buildListItemHtml = (bm) => {
   `;
 };
 
+// Native share. Priority:
+//   1) Electron IPC bridge → macOS native share sheet (AirDrop, Messages, Mail)
+//   2) navigator.share     → mobile PWA native share sheet
+//   3) Clipboard copy      → silent fallback with ✓ feedback
+export const buildShareButton = (bm) => {
+  const shareBtn = document.createElement("button");
+  shareBtn.className = "card-action-btn";
+  shareBtn.title = "Share";
+  shareBtn.innerHTML = SHARE_ICON;
+
+  const flashCopied = () => {
+    const originalHtml = shareBtn.innerHTML;
+    shareBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    shareBtn.style.color = "#4ade80";
+    setTimeout(() => {
+      shareBtn.innerHTML = originalHtml;
+      shareBtn.style.color = "";
+    }, 1200);
+  };
+
+  shareBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+
+    const title = bm.authorName ? `${bm.authorName} on X` : "X bookmark";
+    const cleanText = (bm.text || "").replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+    const text = cleanText ? cleanText.slice(0, 200) : "";
+
+    // 1) Electron (macOS) — native share menu via IPC
+    if (window.electronAPI?.shareUrl) {
+      try {
+        const ok = await window.electronAPI.shareUrl({ url: bm.url, title, text });
+        if (ok) return;
+      } catch (err) {
+        console.warn("Electron share failed:", err);
+      }
+    }
+
+    // 2) Web Share API (mobile PWA primarily)
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ url: bm.url, title, ...(text && { text }) });
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.warn("navigator.share failed, falling back to clipboard:", err);
+      }
+    }
+
+    // 3) Clipboard fallback
+    try {
+      await navigator.clipboard.writeText(bm.url);
+      flashCopied();
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+    }
+  });
+  return shareBtn;
+};
+
 export const addCardActions = (mediaWrap, images, bm) => {
   const wrap = document.createElement("div");
   wrap.className = "card-actions";
+
+  // Share button is always first
+  wrap.appendChild(buildShareButton(bm));
 
   if (images.length > 1) {
     // Multi-image: zip all media into single download

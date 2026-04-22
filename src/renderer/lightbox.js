@@ -3,6 +3,7 @@
 import { dom } from './state.js';
 import { twitterImageUrl, escapeHtml } from './helpers.js';
 import { downloadImage, copyImageToClipboard, mediaDownloadUrl, bookmarkFilename } from './media.js';
+import { buildShareButton } from './card.js';
 
 export const lbState = {
   lightboxOpen: false,
@@ -78,9 +79,12 @@ const updateLbActions = (imgData) => {
   lbActionsEl.style.display = "";
 };
 
-const createLbActions = () => {
+const createLbActions = (bookmark) => {
   const wrap = document.createElement("div");
   wrap.className = "card-actions lb-actions";
+
+  const shareBtn = buildShareButton(bookmark);
+  shareBtn.classList.add("lb-share-btn");
 
   const copyBtn = document.createElement("button");
   copyBtn.className = "card-action-btn lb-copy-btn";
@@ -98,7 +102,9 @@ const createLbActions = () => {
   infoBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
   infoBtn.style.display = "none";
 
+  // Order: info (conditional) → share → copy → download
   wrap.appendChild(infoBtn);
+  wrap.appendChild(shareBtn);
   wrap.appendChild(copyBtn);
   wrap.appendChild(dlBtn);
   return wrap;
@@ -289,8 +295,8 @@ export const openLightbox = (el, bookmark) => {
     lbShowPhoto(lightboxClone, img0);
   }
 
-  // Action buttons (copy + download) — hidden for videos
-  lbActionsEl = createLbActions();
+  // Action buttons (share + copy + download) — copy hidden for videos
+  lbActionsEl = createLbActions(bookmark);
   lightboxClone.appendChild(lbActionsEl);
   updateLbActions(img0);
 

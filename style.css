@@ -190,6 +190,12 @@ body {
   pointer-events: auto;
 }
 
+/* Text-only cards: actions sit at bottom-right of the whole card */
+.card-actions--text-only {
+  bottom: 10px;
+  right: 10px;
+}
+
 .card-action-btn {
   width: 30px;
   height: 30px;

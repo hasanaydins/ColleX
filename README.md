@@ -26,6 +26,7 @@
 - Rich lightbox for viewing media and post details
 - Bulk selection and ZIP download for saved media
 - Export filtered bookmarks to JSON or CSV
+- Native macOS share sheet on every bookmark — AirDrop a post to your phone, send via Messages, Mail, or Notes in one click
 - Local-first experience with no cloud sync or telemetry
 - Sign in through X’s official login flow
 - Bookmark data stays on your device

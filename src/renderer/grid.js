@@ -1,7 +1,7 @@
 // --- Grid rendering: masonry, card, and list views ---
 
 import { state, CONFIG, dom } from './state.js';
-import { buildCardHtml, buildListItemHtml, addCardActions } from './card.js';
+import { buildCardHtml, buildListItemHtml, addCardActions, buildShareButton } from './card.js';
 import { loadOgCard, mediaHeight } from './media.js';
 import { selectState, toggleCardSelected } from './select.js';
 import { openLightbox } from './lightbox.js';
@@ -176,6 +176,12 @@ const setupCardInteractions = (item, bm, hasMedia, sharedVideoObserver) => {
   if (!hasMedia) {
     const ogWrap = item.querySelector(".og-wrap");
     if (ogWrap) loadOgCard(bm, ogWrap);
+
+    // Share button for text-only cards (media cards get it via addCardActions)
+    const actions = document.createElement("div");
+    actions.className = "card-actions card-actions--text-only";
+    actions.appendChild(buildShareButton(bm));
+    item.appendChild(actions);
   } else {
     const fields = state.viewFields[state.activeView];
     if (fields.media) {
