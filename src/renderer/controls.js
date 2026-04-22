@@ -598,15 +598,83 @@ export const createUserPill = (container) => {
 
 // --- Export Menu ---
 
+const formatCount = (n) => {
+  if (n == null) return null;
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+};
+
+const buildMarkdown = (data) => {
+  const now = new Date();
+  const header = [
+    "# X Bookmarks",
+    "",
+    `*Exported from ColleX on ${now.toISOString().slice(0, 10)} — ${data.length} bookmarks*`,
+    "",
+    "---",
+    "",
+  ].join("\n");
+
+  const sections = data.map((bm) => {
+    const cleanText = (bm.text || "").replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+    const date = bm.postedAt
+      ? new Date(bm.postedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+      : "";
+
+    const lines = [];
+    const name = bm.authorName || bm.authorHandle || "Unknown";
+    const handle = bm.authorHandle ? `[@${bm.authorHandle}](https://x.com/${bm.authorHandle})` : "";
+    lines.push(`### ${name}${handle ? ` (${handle})` : ""}`);
+    if (date) lines.push(`*${date}*`);
+    lines.push("");
+
+    if (cleanText) {
+      // Quote each line of the tweet
+      lines.push(cleanText.split("\n").map((l) => `> ${l}`).join("\n"));
+      lines.push("");
+    }
+
+    // Inline media
+    for (const img of bm.images || []) {
+      if (img.type === "video" || img.type === "animated_gif") {
+        if (img.videoUrl) lines.push(`[▶ Video](${img.videoUrl})`);
+      } else if (img.url) {
+        lines.push(`![](${img.url})`);
+      }
+    }
+    if ((bm.images || []).length > 0) lines.push("");
+
+    // Stats row
+    const stats = [];
+    const likes = formatCount(bm.likeCount);
+    const reposts = formatCount(bm.repostCount);
+    const bms = formatCount(bm.bookmarkCount);
+    if (likes) stats.push(`**Likes:** ${likes}`);
+    if (reposts) stats.push(`**Reposts:** ${reposts}`);
+    if (bms) stats.push(`**Bookmarks:** ${bms}`);
+    if (stats.length) lines.push(stats.join(" · "));
+
+    if (bm.folders?.length) lines.push(`**Folders:** ${bm.folders.map((f) => `\`${f}\``).join(", ")}`);
+
+    if (bm.url) lines.push(`[View on X](${bm.url})`);
+
+    lines.push("", "---", "");
+    return lines.join("\n");
+  });
+
+  return header + sections.join("\n");
+};
+
 const exportBookmarks = (format) => {
   const data = state.filteredBookmarks;
   if (!data.length) return;
-  
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   let content = "";
   let type = "";
   let ext = "";
-  
+
   if (format === "json") {
     content = JSON.stringify(data, null, 2);
     type = "application/json";
@@ -625,8 +693,12 @@ const exportBookmarks = (format) => {
     });
     type = "text/csv;charset=utf-8;";
     ext = "csv";
+  } else if (format === "md") {
+    content = buildMarkdown(data);
+    type = "text/markdown;charset=utf-8;";
+    ext = "md";
   }
-  
+
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -672,8 +744,19 @@ export const createExportMenu = (container) => {
       dropdown.classList.remove("open");
     });
 
+    // Markdown Option — compatible with Obsidian, Notion import, Logseq, Bear
+    const btnMd = document.createElement("button");
+    btnMd.className = "folder-dropdown-item";
+    btnMd.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15V9l3 3 3-3v6"/><path d="M17 9v6"/><path d="M15 13l2 2 2-2"/></svg> Export Markdown`;
+    btnMd.addEventListener("click", (e) => {
+      e.stopPropagation();
+      exportBookmarks("md");
+      dropdown.classList.remove("open");
+    });
+
     dropdown.appendChild(btnJson);
     dropdown.appendChild(btnCsv);
+    dropdown.appendChild(btnMd);
   };
 
   pill.addEventListener("click", (e) => {
