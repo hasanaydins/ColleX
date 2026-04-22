@@ -723,7 +723,18 @@ export const createExportMenu = (container) => {
   
   const buildDropdown = () => {
     dropdown.innerHTML = "";
-    
+
+    // Info: count of bookmarks that will be exported (reflects active filters)
+    const count = state.filteredBookmarks.length;
+    const total = state.allBookmarks.length;
+    const isFiltered = count !== total;
+    const info = document.createElement("div");
+    info.className = "export-dropdown-info";
+    info.textContent = isFiltered
+      ? `Exporting ${count} of ${total} bookmarks (filtered)`
+      : `Exporting all ${count} bookmarks`;
+    dropdown.appendChild(info);
+
     // JSON Option
     const btnJson = document.createElement("button");
     btnJson.className = "folder-dropdown-item";

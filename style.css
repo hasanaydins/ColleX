@@ -801,6 +801,15 @@ body {
   font-weight: 600;
 }
 
+.export-dropdown-info {
+  padding: 8px 12px 10px;
+  font-size: 11px;
+  color: rgba(var(--fg-rgb), 0.5);
+  border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+  margin-bottom: 4px;
+  letter-spacing: 0.01em;
+}
+
 /* --- Theme toggle --- */
 
 .theme-toggle {
