@@ -1,12 +1,14 @@
 <img src="assets/AppIcon.png" alt="ColleX" width="160" align="left" hspace="20" vspace="8" />
 
-# ColleX
-
-Turn your X (Twitter) bookmarks into a clean, visual library you can actually browse and use. Masonry grid, folder sync, bulk media export — everything runs locally, no cloud, no telemetry.
-
+<div>
+<h3>ColleX</h3>
+<p>Turn your X (Twitter) bookmarks into a clean, visual library you can actually browse and use. Masonry grid, folder sync, bulk media export — everything runs locally, no cloud, no telemetry.</p>
 <a href="https://github.com/hasanaydins/ColleX/releases/latest">
   <img src="https://img.shields.io/badge/Download%20for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
 </a>
+</div>
+
+<br/><br/>
 
 <br clear="left" />
 
