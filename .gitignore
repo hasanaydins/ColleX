@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# User data (generated at runtime, may contain personal content)
+bookmarks-data.json
+folders-data.json
+
+# Secrets — Twitter auth tokens, never commit
+credentials.json
+.env
+.env.local
+.env.*.local
+
+# Runtime caches (populated on dev launches; lives under userData in prod)
+video-cache/
+
+# Electron-builder output
+dist/
+out/
+*.dmg
+*.zip
+*.app
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project-local tooling
+.claude/
+lucas-centered-animation/

@@ -1,0 +1,63 @@
+{
+  "name": "collex",
+  "version": "1.0.0",
+  "productName": "ColleX",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:server": "node server.js",
+    "build": "electron-builder --mac",
+    "pack": "electron-builder --dir"
+  },
+  "keywords": [],
+  "author": "Hasan Aydın <hello@hasanaydin.co>",
+  "license": "MIT",
+  "description": "Browse your X bookmarks in a beautiful visual desktop library",
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "motion": "^12.38.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.collex.app",
+    "productName": "ColleX",
+    "executableName": "ColleX",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": {
+        "teamId": "Y85AD4A7KD"
+      },
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server.js",
+      "src/**",
+      "login.html",
+      "index.html",
+      "app.js",
+      "style.css",
+      "assets/**",
+      "node_modules/**",
+      "!node_modules/.cache"
+    ],
+    "asar": true
+  }
+}

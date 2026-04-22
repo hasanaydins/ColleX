@@ -1,0 +1,179 @@
+// --- Card building: HTML generation & action buttons ---
+
+import { escapeHtml, DL_ICON, COPY_ICON } from './helpers.js';
+import { buildMediaHtml, downloadImage, copyImageToClipboard, bookmarkFilename, mediaDownloadUrl, triggerAnchorDownload, bookmarksToZip } from './media.js';
+import { state } from './state.js';
+
+// --- Stats row (likes, reposts, bookmarks) ---
+const buildStatsHtml = (bm) => {
+  const items = [];
+  if (bm.likeCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${formatCount(bm.likeCount)}</span>`);
+  if (bm.repostCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>${formatCount(bm.repostCount)}</span>`);
+  if (bm.bookmarkCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${formatCount(bm.bookmarkCount)}</span>`);
+  return items.length ? `<div class="card-stats">${items.join("")}</div>` : "";
+};
+
+const formatCount = (n) => {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+};
+
+// --- Date formatting ---
+const formatDate = (dateStr) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+
+const buildDateHtml = (bm) => {
+  if (!bm.postedAt) return "";
+  return `<span class="card-date">${formatDate(bm.postedAt)}</span>`;
+};
+
+// --- Masonry / Card view card ---
+export const buildCardHtml = (bm) => {
+  const hasMedia = bm.images && bm.images.length > 0;
+  const fields = state.viewFields[state.activeView];
+  const cleanText = bm.text.replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+
+  const authorHtml = fields.author ? `
+    <div class="card-author">
+      <img class="card-avatar" src="${escapeHtml(bm.authorAvatar)}" alt="" loading="lazy">
+      <div class="card-author-text">
+        <span class="card-author-name">${escapeHtml(bm.authorName)}</span>
+        <span class="card-author-handle">@${escapeHtml(bm.authorHandle)}</span>
+      </div>
+    </div>
+  ` : "";
+
+  const textHtml = (fields.text && cleanText) ? `<p class="card-text">${escapeHtml(cleanText)}</p>` : "";
+  const statsHtml = fields.stats ? buildStatsHtml(bm) : "";
+  const dateHtml = fields.date ? buildDateHtml(bm) : "";
+
+  const infoContent = authorHtml + textHtml + statsHtml + dateHtml;
+  const showInfo = infoContent.trim().length > 0;
+
+  if (hasMedia) {
+    const mediaHtml = fields.media ? buildMediaHtml(bm.images) : "";
+    return `${mediaHtml}${showInfo ? `<div class="card-info">${infoContent}</div>` : ""}`;
+  }
+
+  // Text-only card
+  return `
+    <div class="card-info card-info--text-only">${infoContent}</div>
+    <div class="og-wrap" data-needs-og="1"></div>
+  `;
+};
+
+// --- List view item ---
+export const buildListItemHtml = (bm) => {
+  const hasMedia = bm.images && bm.images.length > 0;
+  const fields = state.viewFields.list;
+  const cleanText = bm.text.replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+
+  let thumbHtml = "";
+  if (fields.media && hasMedia) {
+    const img = bm.images[0];
+    const isVideo = (img.type === "video" || img.type === "animated_gif") && img.videoUrl;
+    const isGif = img.type === "animated_gif";
+    const thumbUrl = img.url;
+    const mediaEl = isVideo
+      ? `<video class="card-video" data-src="/proxy-video?url=${encodeURIComponent(img.videoUrl)}" poster="${escapeHtml(thumbUrl)}" ${isGif ? "loop" : ""} muted playsinline></video>`
+      : `<img src="${escapeHtml(thumbUrl)}" alt="" loading="lazy">`;
+    thumbHtml = `
+      <div class="list-thumb">
+        ${mediaEl}
+        ${isVideo ? `<div class="video-loader video-loader--sm" aria-hidden="true"></div>` : ""}
+        ${isVideo ? `<div class="list-thumb-badge">${isGif ? "GIF" : "▶"}</div>` : ""}
+        ${bm.images.length > 1 ? `<div class="list-thumb-count">${bm.images.length}</div>` : ""}
+      </div>
+    `;
+  }
+
+  const authorHtml = fields.author ? `
+    <div class="list-author">
+      <img class="list-avatar" src="${escapeHtml(bm.authorAvatar)}" alt="" loading="lazy">
+      <span class="list-author-name">${escapeHtml(bm.authorName)}</span>
+      <span class="list-author-handle">@${escapeHtml(bm.authorHandle)}</span>
+    </div>
+  ` : "";
+
+  const textHtml = (fields.text && cleanText) ? `<p class="list-text">${escapeHtml(cleanText)}</p>` : "";
+  const statsHtml = fields.stats ? buildStatsHtml(bm) : "";
+  const dateHtml = fields.date ? buildDateHtml(bm) : "";
+
+  const metaHtml = (statsHtml || dateHtml) ? `<div class="list-meta">${statsHtml}${dateHtml}</div>` : "";
+
+  return `
+    ${thumbHtml}
+    <div class="list-content">
+      ${authorHtml}
+      ${textHtml}
+      ${metaHtml}
+    </div>
+  `;
+};
+
+export const addCardActions = (mediaWrap, images, bm) => {
+  const wrap = document.createElement("div");
+  wrap.className = "card-actions";
+
+  if (images.length > 1) {
+    // Multi-image: zip all media into single download
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "card-action-btn card-action-btn--multi";
+    dlBtn.title = `Download all ${images.length} items as ZIP`;
+    const origHtml = `${DL_ICON}<span>${images.length}</span>`;
+    dlBtn.innerHTML = origHtml;
+
+    dlBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      dlBtn.disabled = true;
+      dlBtn.innerHTML = `${DL_ICON}<span>…</span>`;
+      try {
+        const { zipBlob, totalFiles } = await bookmarksToZip([bm]);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const safeHandle = (bm.authorHandle || "bookmark").replace(/[^\w\-]/g, "_");
+        triggerAnchorDownload(URL.createObjectURL(zipBlob), `${safeHandle}_${dateStr}.zip`);
+
+        // Success feedback: checkmark
+        dlBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>${totalFiles}</span>`;
+        dlBtn.style.color = "#4ade80";
+        setTimeout(() => {
+          dlBtn.innerHTML = origHtml;
+          dlBtn.style.color = "";
+          dlBtn.disabled = false;
+        }, 1500);
+      } catch (err) {
+        console.error(err);
+        dlBtn.innerHTML = origHtml;
+        dlBtn.disabled = false;
+      }
+    });
+    wrap.appendChild(dlBtn);
+  } else {
+    const img = images[0];
+    const isVideo = img.type === "video" || img.type === "animated_gif";
+    const { url: dlUrl, ext } = mediaDownloadUrl(img);
+    const filename = bookmarkFilename(bm, ext);
+
+    if (!isVideo) {
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "card-action-btn";
+      copyBtn.title = "Copy image";
+      copyBtn.innerHTML = COPY_ICON;
+      copyBtn.addEventListener("click", (e) => { e.stopPropagation(); copyImageToClipboard(dlUrl, copyBtn); });
+      wrap.appendChild(copyBtn);
+    }
+
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "card-action-btn";
+    dlBtn.title = isVideo ? "Download video" : "Download image";
+    dlBtn.innerHTML = DL_ICON;
+    dlBtn.addEventListener("click", (e) => { e.stopPropagation(); downloadImage(dlUrl, filename); });
+    wrap.appendChild(dlBtn);
+  }
+
+  mediaWrap.appendChild(wrap);
+};

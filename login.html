@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect Your X Account</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      text-align: center;
+      max-width: 440px;
+      padding: 48px 40px;
+    }
+
+    .logo {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 28px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 32px;
+    }
+
+    .steps {
+      text-align: left;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.5;
+    }
+
+    .step + .step {
+      margin-top: 14px;
+    }
+
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 13px 28px;
+      background: #fff;
+      color: #0a0a0a;
+      border: none;
+      border-radius: 100px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+
+    .btn:hover { opacity: 0.88; }
+
+    .spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(0,0,0,0.2);
+      border-top-color: #0a0a0a;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status {
+      margin-top: 20px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path d="M4 6h16M4 10h16M4 14h10M4 18h8" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <h1>Connect your X account</h1>
+    <p>ColleX opens the official X login flow in this window. Your password stays with X, your data is not shared, and your bookmarks stay local on your device.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <span>Click the button below to open the official X login in this window</span>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <span>Sign in on X if needed. Your email, username, password, and any verification steps go directly to X, not to ColleX.</span>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <span>Once your Bookmarks page opens, ColleX connects automatically. Your bookmark data stays local on this device and is never shared by the app.</span>
+      </div>
+    </div>
+
+    <button class="btn" id="connect-btn">
+      <span class="spinner" id="spinner"></span>
+      <span id="btn-label">Open X Login</span>
+    </button>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    document.getElementById("connect-btn").addEventListener("click", () => {
+      document.getElementById("spinner").style.display = "block";
+      document.getElementById("btn-label").textContent = "Opening…";
+      document.getElementById("connect-btn").disabled = true;
+      document.getElementById("status").textContent = "Waiting for X sign-in and your Bookmarks page…";
+      // Navigate this window to X; the main process interceptor handles the rest
+      window.location.href = "https://x.com/i/flow/login";
+    });
+  </script>
+</body>
+</html>
