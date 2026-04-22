@@ -1,9 +1,4 @@
-<table>
-<tr>
-<td width="180" align="center" valign="middle">
-<img src="assets/AppIcon.png" alt="ColleX" width="160" />
-</td>
-<td valign="middle">
+<img src="assets/AppIcon.png" alt="ColleX" width="160" align="left" hspace="20" vspace="8" />
 
 # ColleX
 
@@ -13,9 +8,7 @@ Turn your X (Twitter) bookmarks into a clean, visual library you can actually br
   <img src="https://img.shields.io/badge/Download%20for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
 </a>
 
-</td>
-</tr>
-</table>
+<br clear="left" />
 
 <p align="center">
 <img src="assets/apppreview.jpg" alt="ColleX demo" width="720" />
