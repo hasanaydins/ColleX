@@ -35,7 +35,15 @@ Everything runs locally on your machine. No cloud sync, no telemetry, no data le
 
 ### Option 1 — Download the `.dmg` (recommended)
 
-Grab the latest build from the [GitHub Releases](https://github.com/hasanaydins/ColleX/releases) page, open the `.dmg`, and drag **ColleX** into your Applications folder.
+Grab the latest build from the [GitHub Releases](https://github.com/hasanaydins/ColleX/releases) page.
+
+Pick the build that matches your Mac:
+
+| Mac model | File |
+|---|---|
+| **Apple Silicon** (M1, M2, M3, M4) | `ColleX-x.y.z-arm64.dmg` |
+| **Intel** (pre-2020 Macs) | `ColleX-x.y.z.dmg` |
+
 
 ### Option 2 — Run from source
 
