@@ -468,11 +468,11 @@ export const createFolderPill = (container) => {
 const updateSyncButtonState = (lastSyncAt) => {
   const btn = document.getElementById("sync-btn");
   if (!btn) return;
-  const hoursSince = (Date.now() - new Date(lastSyncAt)) / 3600000;
-  if (hoursSince < 24) {
-    const hoursLeft = Math.ceil(24 - hoursSince);
+  const minutesSince = (Date.now() - new Date(lastSyncAt)) / 60000;
+  if (minutesSince < 60) {
+    const minutesLeft = Math.ceil(60 - minutesSince);
     btn.disabled = true;
-    btn.querySelector("span").textContent = `Next sync in ${hoursLeft}h`;
+    btn.querySelector("span").textContent = `Next sync in ${minutesLeft}m`;
     btn.title = `Last synced: ${new Date(lastSyncAt).toLocaleString()}`;
   } else {
     btn.title = `Last synced: ${new Date(lastSyncAt).toLocaleString()}`;

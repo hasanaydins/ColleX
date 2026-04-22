@@ -9,6 +9,11 @@ const { loadCredentials } = require("./credentials");
 const FALLBACK_BEARER =
   "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
+// Claimed Chrome major version for UA + client-hint headers. Using stable-1
+// (one behind current stable) so the UA matches the largest real-user slice
+// and avoids bleeding-edge fingerprint mismatches. Bump periodically.
+const CHROME_MAJOR = 146;
+
 // Feature flags required by X's GraphQL API
 const GRAPHQL_FEATURES = {
   rweb_video_screen_enabled: false,
@@ -59,9 +64,18 @@ function makeHeaders({ bearerToken, ct0, authToken }) {
     "x-twitter-client-language": "en",
     cookie: `auth_token=${authToken}; ct0=${ct0}`,
     "user-agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_MAJOR}.0.0.0 Safari/537.36`,
     "content-type": "application/json",
     accept: "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    referer: "https://x.com/i/bookmarks",
+    origin: "https://x.com",
+    "sec-ch-ua": `"Google Chrome";v="${CHROME_MAJOR}", "Chromium";v="${CHROME_MAJOR}", "Not?A_Brand";v="24"`,
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
   };
 }
 
@@ -221,6 +235,7 @@ function transformBookmark(raw) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const jitter = (min, max) => min + Math.floor(Math.random() * (max - min));
 
 async function fetchAllPages(creds, onProgress) {
   let cursor = null;
@@ -249,8 +264,9 @@ async function fetchAllPages(creds, onProgress) {
         break;
       } catch (err) {
         if (err.status === 429 && attempts < 2) {
-          onProgress({ type: "progress", message: `Rate limited — waiting 60s…`, count: all.length });
-          await sleep(60000);
+          const waitMs = 30000 * Math.pow(2, attempts) + jitter(0, 10000);
+          onProgress({ type: "progress", message: `Rate limited — waiting ${Math.round(waitMs / 1000)}s…`, count: all.length });
+          await sleep(waitMs);
           attempts++;
         } else {
           throw err;
@@ -266,7 +282,7 @@ async function fetchAllPages(creds, onProgress) {
 
     if (!nextCursor || tweets.length === 0) break;
     cursor = nextCursor;
-    await sleep(500);
+    await sleep(jitter(800, 2000));
   }
 
   return all;
@@ -304,7 +320,7 @@ async function fetchFolderTweetIds(creds, folderId, folderName, onProgress) {
 
     if (!nextCursor || tweets.length === 0) break;
     cursor = nextCursor;
-    await sleep(400);
+    await sleep(jitter(700, 1800));
   }
 
   return ids;
@@ -320,7 +336,12 @@ async function enrichWithFolders(creds, bookmarks, onProgress) {
 
     const bookmarkById = new Map(bookmarks.map((b) => [b.id, b]));
 
+    let firstFolder = true;
     for (const folder of folders) {
+      // Space out folder requests so we don't burst-enumerate the whole list.
+      if (!firstFolder) await sleep(jitter(2000, 5000));
+      firstFolder = false;
+
       let tweetIds;
       try {
         tweetIds = await fetchFolderTweetIds(creds, folder.id, folder.name, onProgress);
@@ -364,6 +385,10 @@ async function syncBookmarks(dataDir, onProgress) {
 
   // Sort by most recent first
   bookmarks.sort((a, b) => new Date(b.postedAt) - new Date(a.postedAt));
+
+  // Pause before switching to folder enumeration so the two phases don't look
+  // like one continuous burst.
+  await sleep(jitter(3000, 6000));
 
   // Tag bookmarks with folder names (best-effort — folders stay empty on failure)
   const folders = await enrichWithFolders(creds, bookmarks, onProgress);

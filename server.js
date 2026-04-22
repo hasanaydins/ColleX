@@ -327,7 +327,7 @@ function createServer(port, dataDir) {
       return;
     }
 
-    // Bookmark sync endpoint (SSE) — max once per 24 hours
+    // Bookmark sync endpoint (SSE) — max once per hour
     if (parsed.pathname === "/sync") {
       const { loadCredentials, saveCredentials } = require("./src/credentials");
       const creds = loadCredentials(DATA_DIR);
@@ -339,13 +339,13 @@ function createServer(port, dataDir) {
         "Access-Control-Allow-Origin": "*",
       };
 
-      // Enforce daily sync limit
+      // Enforce hourly sync limit
       if (creds?.lastSyncAt) {
-        const hoursSince = (Date.now() - new Date(creds.lastSyncAt)) / 3600000;
-        if (hoursSince < 24) {
-          const hoursLeft = Math.ceil(24 - hoursSince);
+        const minutesSince = (Date.now() - new Date(creds.lastSyncAt)) / 60000;
+        if (minutesSince < 60) {
+          const minutesLeft = Math.ceil(60 - minutesSince);
           res.writeHead(200, sseHeaders);
-          res.write(`data: ${JSON.stringify({ type: "limit", hoursLeft })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "limit", minutesLeft })}\n\n`);
           res.end();
           return;
         }

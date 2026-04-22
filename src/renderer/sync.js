@@ -9,9 +9,9 @@ export const startSync = (btn) => {
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
     if (d.type === "limit") {
-      btn.querySelector("span").textContent = `Next sync in ${d.hoursLeft}h`;
+      btn.querySelector("span").textContent = `Next sync in ${d.minutesLeft}m`;
       btn.disabled = true;
-      btn.title = `Daily limit reached. Try again in ${d.hoursLeft} hour(s).`;
+      btn.title = `Hourly limit reached. Try again in ${d.minutesLeft} minute(s).`;
       es.close();
     } else if (d.type === "progress") {
       btn.querySelector("span").textContent = `${d.count} fetched…`;
