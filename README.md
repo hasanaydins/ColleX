@@ -1,15 +1,21 @@
-<p align="center">
-  <img src="assets/AppLogo.svg" alt="ColleX" width="128" height="128" />
-</p>
+<table>
+<tr>
+<td width="180" align="center" valign="middle">
+<img src="assets/AppIcon.png" alt="ColleX" width="160" />
+</td>
+<td valign="middle">
 
 # ColleX
 
-ColleX is an open-source desktop app for turning your X (Twitter) bookmarks into a clean, visual library you can actually browse and use.
+Turn your X (Twitter) bookmarks into a clean, visual library you can actually browse and use. Masonry grid, folder sync, bulk media export — everything runs locally, no cloud, no telemetry.
 
-View saved posts in masonry, card, or list layouts. Search, filter by folder or media type, download in bulk, and export to JSON or CSV.
+<a href="https://github.com/hasanaydins/ColleX/releases/latest">
+  <img src="https://img.shields.io/badge/Download%20for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+</a>
 
-Everything runs locally on your machine. No cloud sync, no telemetry, no data leaving your device.
-
+</td>
+</tr>
+</table>
 
 <p align="center">
 <img src="assets/apppreview.jpg" alt="ColleX demo" width="720" />
@@ -66,8 +72,6 @@ Everything lives on disk in your user directory:
 ├── credentials.json    # auth tokens (local only, never transmitted)
 └── bookmarks-data.json # your library (bookmarks + folders)
 ```
-
-No cloud sync. No analytics. No telemetry. No third-party servers involved.
 
 ## Privacy & Security
 
