@@ -1,6 +1,7 @@
 const { app, BrowserWindow, session, shell, ipcMain, dialog } = require("electron");
 const net = require("net");
 const path = require("path");
+const { autoUpdater } = require("electron-updater");
 const { loadCredentials, saveCredentials, clearCredentials } = require("./src/credentials");
 const { tryExtractChromeCookies } = require("./src/browser-cookies");
 
@@ -227,6 +228,22 @@ ipcMain.handle("re-login", async () => {
   await beginAuthFlow();
 });
 
+// --- Auto-update ---
+
+function setupAutoUpdater() {
+  if (isDev) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("error", (err) => console.error("[updater] error:", err?.message || err));
+  autoUpdater.on("update-available", (info) => console.log("[updater] update available:", info.version));
+  autoUpdater.on("update-not-available", () => console.log("[updater] up to date"));
+  autoUpdater.on("update-downloaded", (info) => console.log("[updater] downloaded:", info.version));
+
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
 // --- App startup ---
 
 app.whenReady().then(async () => {
@@ -242,6 +259,8 @@ app.whenReady().then(async () => {
   } else {
     await beginAuthFlow();
   }
+
+  setupAutoUpdater();
 });
 
 app.on("window-all-closed", () => {

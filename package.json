@@ -14,6 +14,7 @@
   "license": "MIT",
   "description": "Browse your X bookmarks in a beautiful visual desktop library",
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "jszip": "^3.10.1",
     "motion": "^12.38.0"
   },
@@ -25,6 +26,13 @@
     "appId": "com.collex.app",
     "productName": "ColleX",
     "executableName": "ColleX",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hasanaydins",
+        "repo": "ColleX"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
