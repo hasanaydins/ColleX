@@ -1,6 +1,6 @@
 {
   "name": "collex",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "productName": "ColleX",
   "main": "main.js",
   "scripts": {
@@ -46,6 +46,13 @@
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "arm64",
             "x64"

@@ -252,17 +252,197 @@ ipcMain.handle("share-url", (event, { url, title, text }) => {
 // --- Auto-update ---
 
 function setupAutoUpdater() {
-  if (isDev) return;
+  if (isDev) {
+    console.log("[updater] Skipped in development mode");
+    return;
+  }
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  autoUpdater.on("error", (err) => console.error("[updater] error:", err?.message || err));
-  autoUpdater.on("update-available", (info) => console.log("[updater] update available:", info.version));
-  autoUpdater.on("update-not-available", () => console.log("[updater] up to date"));
-  autoUpdater.on("update-downloaded", (info) => console.log("[updater] downloaded:", info.version));
+  autoUpdater.on("error", (err) => {
+    console.error("[updater] error:", err?.message || err);
+    dialog.showErrorBox("Update Error", `Failed to check for updates: ${err?.message || err}`);
+  });
 
-  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  autoUpdater.on("checking-for-update", () => {
+    console.log("[updater] Checking for updates...");
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("[updater] update available:", info.version);
+    dialog.showMessageBox({
+      type: "info",
+      title: "Update Available",
+      message: `A new version ${info.version} is available!`,
+      detail: "The update will be downloaded in the background. You'll be notified when it's ready to install.",
+      buttons: ["OK"],
+    });
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    console.log("[updater] up to date:", info.version);
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    console.log(`[updater] Download progress: ${Math.round(progress.percent)}%`);
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log("[updater] downloaded:", info.version);
+    const response = dialog.showMessageBoxSync({
+      type: "info",
+      title: "Update Ready",
+      message: `Version ${info.version} has been downloaded.`,
+      detail: "The update will be installed when you quit the app. Would you like to restart now?",
+      buttons: ["Restart Now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+
+    if (response === 0) {
+      autoUpdater.quitAndInstall(false, true);
+    }
+  });
+
+  // Check for updates on startup
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error("[updater] Failed to check for updates:", err);
+    });
+  }, 3000);
+}
+
+// Show custom About dialog
+function showAboutDialog() {
+  const version = app.getVersion();
+
+  dialog.showMessageBox({
+    type: "info",
+    title: `About ${app.name}`,
+    message: `${app.name}`,
+    detail: `Version ${version}\n\nBrowse your X bookmarks in a beautiful visual desktop library.\n\n© 2026 Hasan Aydın`,
+    buttons: ["OK"],
+    icon: path.join(__dirname, "assets/AppIcon.png"),
+  });
+}
+
+// Manual update check
+function checkForUpdatesManually() {
+  if (isDev) {
+    dialog.showMessageBox({
+      type: "info",
+      title: "Development Mode",
+      message: "Auto-update is disabled in development mode.",
+      buttons: ["OK"],
+    });
+    return;
+  }
+
+  autoUpdater.checkForUpdates().then((result) => {
+    if (!result || !result.updateInfo) {
+      dialog.showMessageBox({
+        type: "info",
+        title: "No Updates",
+        message: "You're already running the latest version!",
+        buttons: ["OK"],
+      });
+    }
+  }).catch((err) => {
+    dialog.showErrorBox("Update Check Failed", `Could not check for updates: ${err?.message || err}`);
+  });
+}
+
+// --- Menu setup ---
+
+function createAppMenu() {
+  const isMac = process.platform === "darwin";
+
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        {
+          label: `About ${app.name}`,
+          click: () => showAboutDialog(),
+        },
+        { type: "separator" },
+        {
+          label: "Check for Updates...",
+          click: () => checkForUpdatesManually(),
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    }] : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        ...(isMac ? [
+          { role: "pasteAndMatchStyle" },
+          { role: "delete" },
+          { role: "selectAll" },
+        ] : [
+          { role: "delete" },
+          { type: "separator" },
+          { role: "selectAll" },
+        ]),
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(isMac ? [
+          { type: "separator" },
+          { role: "front" },
+          { type: "separator" },
+          { role: "window" },
+        ] : [
+          { role: "close" },
+        ]),
+      ],
+    },
+    ...(!isMac ? [{
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates...",
+          click: () => checkForUpdatesManually(),
+        },
+      ],
+    }] : []),
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
 
 // --- App startup ---
@@ -273,6 +453,9 @@ app.whenReady().then(async () => {
   // Start HTTP server (OG proxy, video proxy, static files, /sync SSE)
   const { createServer } = require("./server");
   createServer(serverPort, DATA_DIR);
+
+  // Setup application menu
+  createAppMenu();
 
   const creds = loadCredentials(DATA_DIR);
   if (creds) {
