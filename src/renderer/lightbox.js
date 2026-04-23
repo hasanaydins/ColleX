@@ -1,7 +1,7 @@
 // --- Lightbox: open, close, carousel navigation ---
 
 import { dom } from './state.js';
-import { twitterImageUrl, escapeHtml, hostnameOf, primaryLinkFor } from './helpers.js';
+import { twitterImageUrl, escapeHtml, hostnameOf, primaryLinkFor, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { downloadImage, copyImageToClipboard, mediaDownloadUrl, bookmarkFilename } from './media.js';
 import { buildShareButton } from './card.js';
 
@@ -208,6 +208,88 @@ const wireThreadButton = (root, bookmark) => {
 
 let lightboxClone = null;
 let lbActionsEl = null;
+let lbContextMenuEl = null;
+
+// Right-click / long-press context menu on lightbox media. Mirrors the floating
+// action buttons (share / copy / download) so the actions are reachable without
+// needing the toolbar to be on screen — matches native image-viewer expectations.
+const closeContextMenu = () => {
+  if (!lbContextMenuEl) return;
+  lbContextMenuEl.remove();
+  lbContextMenuEl = null;
+  document.removeEventListener("click", handleCtxOutsideClick, true);
+  document.removeEventListener("keydown", handleCtxEscape, true);
+  window.removeEventListener("scroll", closeContextMenu, true);
+  window.removeEventListener("resize", closeContextMenu);
+};
+
+const handleCtxOutsideClick = (e) => {
+  if (lbContextMenuEl && !lbContextMenuEl.contains(e.target)) closeContextMenu();
+};
+const handleCtxEscape = (e) => {
+  if (e.key === "Escape") { e.stopPropagation(); closeContextMenu(); }
+};
+
+const openMediaContextMenu = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!lbState.lightboxItem || lbState.lightboxItem.isTextOnly) return;
+  const bm = lbState.lightboxItem.bookmark;
+  const imgData = bm?.images?.[lbState.carouselIdx];
+  if (!imgData) return;
+
+  closeContextMenu();
+
+  const isVideo = imgData.type === "video" || imgData.type === "animated_gif";
+  const { url: mediaUrl, ext } = mediaDownloadUrl(imgData);
+  const filename = bookmarkFilename(bm, ext);
+
+  lbContextMenuEl = document.createElement("div");
+  lbContextMenuEl.className = "lb-ctx-menu";
+  lbContextMenuEl.innerHTML = `
+    <button class="lb-ctx-item" data-action="share" type="button">${SHARE_ICON}<span>Share</span></button>
+    ${!isVideo ? `<button class="lb-ctx-item" data-action="copy" type="button">${COPY_ICON}<span>Copy image</span></button>` : ""}
+    <button class="lb-ctx-item" data-action="download" type="button">${DL_ICON}<span>Download ${isVideo ? "video" : "image"}</span></button>
+  `;
+  // Provisional offscreen position so we can measure then clamp to viewport
+  lbContextMenuEl.style.left = "-9999px";
+  lbContextMenuEl.style.top = "0";
+  document.body.appendChild(lbContextMenuEl);
+
+  const rect = lbContextMenuEl.getBoundingClientRect();
+  const PAD = 8;
+  const x = Math.min(Math.max(e.clientX, PAD), window.innerWidth - rect.width - PAD);
+  const y = Math.min(Math.max(e.clientY, PAD), window.innerHeight - rect.height - PAD);
+  lbContextMenuEl.style.left = `${x}px`;
+  lbContextMenuEl.style.top = `${y}px`;
+
+  lbContextMenuEl.querySelector('[data-action="share"]')?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    // Delegate to the existing toolbar share button so we reuse its Electron-IPC
+    // → navigator.share → clipboard fallback chain without duplicating it here.
+    lbActionsEl?.querySelector(".lb-share-btn")?.click();
+    closeContextMenu();
+  });
+  lbContextMenuEl.querySelector('[data-action="copy"]')?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const feedbackBtn = lbActionsEl?.querySelector(".lb-copy-btn");
+    copyImageToClipboard(mediaUrl, feedbackBtn);
+    closeContextMenu();
+  });
+  lbContextMenuEl.querySelector('[data-action="download"]')?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    downloadImage(mediaUrl, filename);
+    closeContextMenu();
+  });
+
+  // Defer so the originating right-click doesn't immediately close the menu
+  setTimeout(() => {
+    document.addEventListener("click", handleCtxOutsideClick, true);
+    document.addEventListener("keydown", handleCtxEscape, true);
+    window.addEventListener("scroll", closeContextMenu, true);
+    window.addEventListener("resize", closeContextMenu);
+  }, 0);
+};
 
 // Populates lightboxClone with a single photo (+ hi-res upgrade)
 const lbShowPhoto = (container, imgData, fit = "cover") => {
@@ -305,6 +387,7 @@ const createLbActions = (bookmark) => {
 
 // Carousel nav (called by buttons and keyboard)
 export const lbCarouselGoTo = (images, idx) => {
+  closeContextMenu();
   lbState.carouselIdx = (idx + images.length) % images.length;
   const track = lightboxClone?.querySelector(".lb-track");
   if (!track) return;
@@ -572,6 +655,7 @@ export const openLightbox = (el, bookmark) => {
   updateLbActions(img0);
 
   document.body.appendChild(lightboxClone);
+  lightboxClone.addEventListener("contextmenu", openMediaContextMenu);
   dom.overlay.classList.add("active");
 
   const cleanText = bookmark.text.replace(/https?:\/\/t\.co\/\S+/g, "").trim();
@@ -730,6 +814,7 @@ export const openLightbox = (el, bookmark) => {
 export const closeLightbox = () => {
   if (!lbState.lightboxOpen || lbState.lightboxAnimating || !lbState.lightboxItem) return;
 
+  closeContextMenu();
   lbState.lightboxAnimating = true;
 
   // Text-only modal: no grid-item animation to reverse — fade out and drop
