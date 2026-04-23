@@ -1,14 +1,19 @@
 // --- Card building: HTML generation & action buttons ---
 
-import { escapeHtml, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
+import { escapeHtml, hostnameOf, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { buildMediaHtml, downloadImage, copyImageToClipboard, bookmarkFilename, mediaDownloadUrl, triggerAnchorDownload, bookmarksToZip } from './media.js';
 import { state } from './state.js';
 
-// --- Stats row (likes, reposts, bookmarks) ---
+// --- Stats row (reply, repost, quote, like, bookmark) ---
+// Reply/quote are hidden when zero since many tweets have none; showing "0"
+// everywhere would clutter the card. Existing counters keep their original
+// `!= null` behaviour for backwards compatibility with older bookmark data.
 const buildStatsHtml = (bm) => {
   const items = [];
-  if (bm.likeCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${formatCount(bm.likeCount)}</span>`);
+  if (bm.replyCount > 0) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>${formatCount(bm.replyCount)}</span>`);
   if (bm.repostCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>${formatCount(bm.repostCount)}</span>`);
+  if (bm.quoteCount > 0) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 .985 0 1 0 1 1v1c0 1-1 2-2 2-1 0-1 .008-1 1.031V20c0 1 0 1 1 1z"/></svg>${formatCount(bm.quoteCount)}</span>`);
+  if (bm.likeCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${formatCount(bm.likeCount)}</span>`);
   if (bm.bookmarkCount != null) items.push(`<span class="stat-item"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${formatCount(bm.bookmarkCount)}</span>`);
   return items.length ? `<div class="card-stats">${items.join("")}</div>` : "";
 };
@@ -59,10 +64,33 @@ export const buildCardHtml = (bm) => {
     return `${mediaHtml}${showInfo ? `<div class="card-info">${infoContent}</div>` : ""}`;
   }
 
-  // Text-only card
+  // Text-only card. Prefer X's own card thumbnail (instant, richer) and fall
+  // back to an async OG scrape for older bookmarks without card data.
+  const linkPreviewHtml = bm.card
+    ? buildXCardPreviewHtml(bm.card)
+    : `<div class="og-wrap" data-needs-og="1"></div>`;
   return `
     <div class="card-info card-info--text-only">${infoContent}</div>
-    <div class="og-wrap" data-needs-og="1"></div>
+    ${linkPreviewHtml}
+  `;
+};
+
+// Inline X-card thumbnail for text-only grid cards (reuses .og-wrap styling so
+// the grid visually matches pre-existing OG cards). Click wiring happens in
+// grid.js so the card-level click handler can be short-circuited.
+const buildXCardPreviewHtml = (card) => {
+  const imgHtml = card.image?.url
+    ? `<img class="og-image" src="${escapeHtml(card.image.url)}" alt="" loading="lazy">`
+    : "";
+  const domain = card.vanityUrl || hostnameOf(card.url || "");
+  return `
+    <div class="og-wrap og-wrap--x loaded">
+      ${imgHtml}
+      <div class="og-meta">
+        ${card.title ? `<span class="og-title">${escapeHtml(card.title)}</span>` : ""}
+        ${domain ? `<span class="og-domain">${escapeHtml(domain)}</span>` : ""}
+      </div>
+    </div>
   `;
 };
 

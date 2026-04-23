@@ -5,6 +5,22 @@ import { buildCardHtml, buildListItemHtml, addCardActions, buildShareButton } fr
 import { loadOgCard, mediaHeight } from './media.js';
 import { selectState, toggleCardSelected } from './select.js';
 import { openLightbox } from './lightbox.js';
+import { primaryLinkFor } from './helpers.js';
+
+// Wire the link-preview thumbnail so clicking it opens the external URL rather
+// than the tweet: matches Twitter's card behaviour and stops the card-wide
+// click from also opening the lightbox.
+const wireOgClick = (item, bm) => {
+  const og = item.querySelector(".og-wrap");
+  if (!og) return;
+  const linkUrl = primaryLinkFor(bm);
+  if (!linkUrl) return;
+  og.style.cursor = "pointer";
+  og.addEventListener("click", (e) => {
+    e.stopPropagation();
+    window.open(linkUrl, "_blank");
+  });
+};
 
 // Single shared IntersectionObserver for all video autoplay — much cheaper than one per card
 let videoObserver = null;
@@ -147,7 +163,8 @@ const renderList = (sharedVideoObserver) => {
     const videoEl = item.querySelector(".card-video");
     if (videoEl) { sharedVideoObserver.observe(videoEl); bindVideoLoader(videoEl); }
 
-    // Click → open tweet or lightbox
+    // Click → open lightbox (text-only bookmarks also open here; link thumbnail
+    // intercepts its own click below to go to the external URL instead).
     item.addEventListener("click", (e) => {
       if (selectState.isSelectMode && hasMedia) {
         e.stopPropagation();
@@ -155,9 +172,9 @@ const renderList = (sharedVideoObserver) => {
         return;
       }
       if (selectState.isSelectMode) return;
-      if (hasMedia) openLightbox(item, bm);
-      else window.open(bm.url, "_blank");
+      openLightbox(item, bm);
     });
+    if (!hasMedia) wireOgClick(item, bm);
 
     // Checkbox for multi-select
     if (hasMedia) {
@@ -175,7 +192,9 @@ const renderList = (sharedVideoObserver) => {
 const setupCardInteractions = (item, bm, hasMedia, sharedVideoObserver) => {
   if (!hasMedia) {
     const ogWrap = item.querySelector(".og-wrap");
-    if (ogWrap) loadOgCard(bm, ogWrap);
+    // Only kick the async OG scrape when we don't already have an X card inlined
+    if (ogWrap && ogWrap.dataset.needsOg === "1") loadOgCard(bm, ogWrap);
+    wireOgClick(item, bm);
 
     // Share button for text-only cards (media cards get it via addCardActions)
     const actions = document.createElement("div");
@@ -208,8 +227,7 @@ const setupCardInteractions = (item, bm, hasMedia, sharedVideoObserver) => {
       return;
     }
     if (selectState.isSelectMode) return;
-    if (hasMedia) openLightbox(item, bm);
-    else window.open(bm.url, "_blank");
+    openLightbox(item, bm);
   });
 };
 

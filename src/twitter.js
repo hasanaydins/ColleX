@@ -83,6 +83,9 @@ function makeHeaders({ bearerToken, ct0, authToken }) {
 // folder enrichment fails gracefully and the main sync still completes.
 const FOLDERS_SLICE_QUERY_ID = "i78YDd0Tza-dV4SYs58kRg";
 const FOLDER_TIMELINE_QUERY_ID = "LML09uXDwh87F1zd7pbf2w";
+// TweetDetail queryId — rotates too. Failure bubbles to /thread as a 502 and
+// the UI hides the "Show thread" state.
+const TWEET_DETAIL_QUERY_ID = "nBS-WpgA6ZG0CyNHD517JQ";
 
 function fetchGraphQL(creds, queryId, operation, variables) {
   return new Promise((resolve, reject) => {
@@ -119,6 +122,40 @@ function fetchGraphQL(creds, queryId, operation, variables) {
 const fetchPage = (creds, variables) =>
   fetchGraphQL(creds, creds.queryId, "Bookmarks", variables);
 
+// Pull a normalized { title, description, url, image } out of X's card
+// binding_values (link preview). Card shapes vary (summary / summary_large_image /
+// player / unified_card) — we probe common keys and return null if nothing useful.
+function parseCard(tweet) {
+  const card = tweet?.card?.legacy;
+  if (!card) return null;
+
+  const bindings = card.binding_values || [];
+  const get = (key) => bindings.find((b) => b.key === key)?.value;
+  const getString = (key) => get(key)?.string_value || null;
+  const getImage = (key) => {
+    const v = get(key)?.image_value;
+    return v && v.url ? { url: v.url, width: v.width || 0, height: v.height || 0 } : null;
+  };
+
+  const image =
+    getImage("thumbnail_image_large") ||
+    getImage("thumbnail_image_original") ||
+    getImage("thumbnail_image") ||
+    getImage("photo_image_full_size_large") ||
+    getImage("photo_image_full_size_original") ||
+    getImage("summary_photo_image_large") ||
+    getImage("summary_photo_image_original") ||
+    null;
+
+  const title = getString("title");
+  const description = getString("description");
+  const vanityUrl = getString("vanity_url");
+  const cardUrl = card.url || getString("card_url");
+
+  if (!title && !description && !image) return null;
+  return { title, description, url: cardUrl, vanityUrl, image };
+}
+
 function parseTweet(tweetResult) {
   const tweet = tweetResult?.tweet ?? tweetResult;
   const legacy = tweet?.legacy;
@@ -151,19 +188,68 @@ function parseTweet(tweetResult) {
     videoVariants: m.video_info?.variants?.filter((v) => v.content_type === "video/mp4") ?? [],
   }));
 
+  // Longform note tweets carry the untruncated body in note_tweet — legacy.full_text
+  // is cut off at ~280 chars for these. Prefer note_tweet when present.
+  const noteTweet = tweet?.note_tweet?.note_tweet_results?.result;
+  const text = noteTweet?.text ?? legacy.full_text ?? "";
+
+  // URL entities — note_tweet has its own entity_set aligned with the longform text
+  const urlEntities =
+    noteTweet?.entity_set?.urls ??
+    legacy.entities?.urls ??
+    [];
+  // Longform detection: X injects a "read more" self-URL into entities when
+  // full_text is truncated. If note_tweet came back, we already have the full
+  // body. If not, the UI can lazy-fetch via TweetDetail to unfurl it.
+  const selfUrlMarker = urlEntities.some(
+    (u) => typeof u.expanded_url === "string" && u.expanded_url.includes(`/status/${tweetId}`)
+  );
+  const isLongForm = !!noteTweet || selfUrlMarker;
+  const textIsTruncated = isLongForm && !noteTweet;
+
+  const urls = urlEntities
+    .filter(
+      (u) =>
+        u.expanded_url &&
+        // Strip the "show more" self-URL marker so it doesn't show up as a user-facing chip
+        !u.expanded_url.includes(`/status/${tweetId}`)
+    )
+    .map((u) => ({
+      tco: u.url || "",
+      expanded: u.expanded_url,
+      display: u.display_url || u.expanded_url,
+    }));
+
+  // Quoted tweet — recurse through parseTweet. Wrapper handling (TweetWithVisibilityResults,
+  // { tweet: … }) is done at the top of parseTweet, so passing the raw result is safe.
+  const quotedResult = tweet?.quoted_status_result?.result;
+  const quotedTweet = quotedResult ? parseTweet(quotedResult) : null;
+
   return {
     tweetId,
-    text: legacy.full_text ?? "",
+    text,
     url: `https://x.com/${authorHandle}/status/${tweetId}`,
     authorHandle: authorHandle ?? "",
     authorName: authorName ?? "",
     authorProfileImageUrl: authorProfileImageUrl ?? "",
     postedAt: legacy.created_at ?? "",
     mediaObjects,
+    urls,
+    card: parseCard(tweet),
+    quotedTweet,
+    isLongForm,
+    textIsTruncated,
+    lang: legacy.lang || "",
+    conversationId: legacy.conversation_id_str || null,
+    inReplyToStatusId: legacy.in_reply_to_status_id_str || null,
+    inReplyToScreenName: legacy.in_reply_to_screen_name || null,
     engagement: {
       likeCount: legacy.favorite_count ?? 0,
       repostCount: legacy.retweet_count ?? 0,
+      replyCount: legacy.reply_count ?? 0,
+      quoteCount: legacy.quote_count ?? 0,
       bookmarkCount: legacy.bookmark_count ?? 0,
+      viewCount: parseInt(tweet?.views?.count, 10) || 0,
     },
   };
 }
@@ -195,13 +281,11 @@ function parseTimelineInstructions(instructions) {
   return { tweets, cursor };
 }
 
-// Transform raw tweet (from parseTweet) → app bookmark format
-function transformBookmark(raw) {
-  const mediaObjects = (raw.mediaObjects || []).filter(
+function extractImages(mediaObjects) {
+  const filtered = (mediaObjects || []).filter(
     (m) => (m.type === "photo" || m.type === "video" || m.type === "animated_gif") && m.url
   );
-
-  const images = mediaObjects.map((m) => {
+  return filtered.map((m) => {
     const entry = {
       url: m.url,
       width: m.width || 1,
@@ -216,6 +300,28 @@ function transformBookmark(raw) {
     }
     return entry;
   });
+}
+
+// Lighter shape for embedded quoted tweets — no folders, no engagement counts,
+// just what the UI needs to render a compact preview.
+function transformQuoted(raw) {
+  if (!raw) return null;
+  return {
+    id: raw.tweetId,
+    text: raw.text || "",
+    url: raw.url || `https://x.com/${raw.authorHandle}/status/${raw.tweetId}`,
+    authorHandle: raw.authorHandle || "",
+    authorName: raw.authorName || "",
+    authorAvatar: raw.authorProfileImageUrl || "",
+    postedAt: raw.postedAt || "",
+    images: extractImages(raw.mediaObjects),
+    urls: raw.urls || [],
+  };
+}
+
+// Transform raw tweet (from parseTweet) → app bookmark format
+function transformBookmark(raw) {
+  const images = extractImages(raw.mediaObjects);
 
   return {
     id: raw.tweetId,
@@ -226,10 +332,23 @@ function transformBookmark(raw) {
     authorAvatar: raw.authorProfileImageUrl || "",
     postedAt: raw.postedAt || "",
     images,
-    mediaCount: mediaObjects.length,
+    mediaCount: images.length,
     likeCount: raw.engagement?.likeCount ?? 0,
     repostCount: raw.engagement?.repostCount ?? 0,
+    replyCount: raw.engagement?.replyCount ?? 0,
+    quoteCount: raw.engagement?.quoteCount ?? 0,
+    viewCount: raw.engagement?.viewCount ?? 0,
     bookmarkCount: raw.engagement?.bookmarkCount ?? 0,
+    urls: raw.urls || [],
+    card: raw.card || null,
+    quotedTweet: transformQuoted(raw.quotedTweet),
+    isLongForm: !!raw.isLongForm,
+    textIsTruncated: !!raw.textIsTruncated,
+    lang: raw.lang || "",
+    conversationId: raw.conversationId || null,
+    inReplyTo: raw.inReplyToScreenName
+      ? { screenName: raw.inReplyToScreenName, statusId: raw.inReplyToStatusId }
+      : null,
     folders: [],
   };
 }
@@ -401,6 +520,56 @@ async function syncBookmarks(dataDir, onProgress) {
   onProgress({ type: "done", total: bookmarks.length });
 }
 
+// Fetches the full threaded conversation around `tweetId` via TweetDetail GraphQL.
+// Returns an array of bookmark-shaped tweets in conversation order (ancestors first,
+// focal tweet in the middle, replies after). No pagination — first page only, which
+// already covers the visible thread for most tweets.
+async function fetchThread(creds, tweetId) {
+  if (!creds.bearerToken) creds.bearerToken = FALLBACK_BEARER;
+
+  const variables = {
+    focalTweetId: String(tweetId),
+    with_rux_injections: false,
+    includePromotedContent: false,
+    withCommunity: true,
+    withQuickPromoteEligibilityTweetFields: true,
+    withBirdwatchNotes: true,
+    withVoice: true,
+    withV2Timeline: true,
+  };
+
+  const json = await fetchGraphQL(creds, TWEET_DETAIL_QUERY_ID, "TweetDetail", variables);
+  const instructions =
+    json?.data?.threaded_conversation_with_injections_v2?.instructions ?? [];
+
+  const tweets = [];
+  const seen = new Set();
+  const push = (result) => {
+    const parsed = parseTweet(result);
+    if (!parsed || seen.has(parsed.tweetId)) return;
+    seen.add(parsed.tweetId);
+    tweets.push(transformBookmark(parsed));
+  };
+
+  for (const instruction of instructions) {
+    if (instruction.type !== "TimelineAddEntries") continue;
+    for (const entry of instruction.entries ?? []) {
+      const direct = entry.content?.itemContent?.tweet_results?.result;
+      if (direct) { push(direct); continue; }
+      // Module-style entries (conversationthread-<id>) wrap multiple reply tweets
+      const items = entry.content?.items;
+      if (Array.isArray(items)) {
+        for (const it of items) {
+          const r = it.item?.itemContent?.tweet_results?.result;
+          if (r) push(r);
+        }
+      }
+    }
+  }
+
+  return tweets;
+}
+
 function fetchUserInfo(creds) {
   return new Promise((resolve) => {
     const headers = makeHeaders(creds);
@@ -428,4 +597,4 @@ function fetchUserInfo(creds) {
   });
 }
 
-module.exports = { syncBookmarks, fetchUserInfo };
+module.exports = { syncBookmarks, fetchUserInfo, fetchThread };

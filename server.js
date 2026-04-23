@@ -327,6 +327,38 @@ function createServer(port, dataDir) {
       return;
     }
 
+    // Fetch full conversation thread for a single tweet (on-demand from lightbox)
+    if (parsed.pathname === "/thread") {
+      const tweetId = parsed.searchParams.get("id");
+      if (!tweetId || !/^\d+$/.test(tweetId)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid id" }));
+        return;
+      }
+      const { loadCredentials } = require("./src/credentials");
+      const creds = loadCredentials(DATA_DIR);
+      if (!creds) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "not authenticated" }));
+        return;
+      }
+      try {
+        const { fetchThread } = require("./src/twitter");
+        const tweets = await fetchThread(creds, tweetId);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Cache-Control": "private, max-age=300",
+        });
+        res.end(JSON.stringify({ tweets }));
+      } catch (err) {
+        res.writeHead(err.status === 401 || err.status === 403 ? 401 : 502, {
+          "Content-Type": "application/json",
+        });
+        res.end(JSON.stringify({ error: err.message || "thread fetch failed" }));
+      }
+      return;
+    }
+
     // Bookmark sync endpoint (SSE) — max once per hour
     if (parsed.pathname === "/sync") {
       const { loadCredentials, saveCredentials } = require("./src/credentials");

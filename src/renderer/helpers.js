@@ -17,6 +17,21 @@ export const extractUrl = (text) => {
   return m ? m[0] : null;
 };
 
+export const hostnameOf = (url) => {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+};
+
+// Best external link for a bookmark — prefers the X card's canonical URL, then
+// any non-t.co URL extracted from the tweet body, then the first expanded URL
+// we captured during sync. Returns null if none found.
+export const primaryLinkFor = (bm) => {
+  if (bm?.card?.url) return bm.card.url;
+  const fromText = extractUrl(bm?.text || "");
+  if (fromText) return fromText;
+  const fromUrls = (bm?.urls || []).find((u) => u?.expanded)?.expanded;
+  return fromUrls || null;
+};
+
 // Prevent events from bubbling out of control areas
 export const stopControlEvents = (el) => {
   el.addEventListener("mousedown", (e) => e.stopPropagation());

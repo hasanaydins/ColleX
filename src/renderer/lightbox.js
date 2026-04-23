@@ -1,7 +1,7 @@
 // --- Lightbox: open, close, carousel navigation ---
 
 import { dom } from './state.js';
-import { twitterImageUrl, escapeHtml } from './helpers.js';
+import { twitterImageUrl, escapeHtml, hostnameOf, primaryLinkFor } from './helpers.js';
 import { downloadImage, copyImageToClipboard, mediaDownloadUrl, bookmarkFilename } from './media.js';
 import { buildShareButton } from './card.js';
 
@@ -11,6 +11,199 @@ export const lbState = {
   lightboxAnimating: false,
   carouselIdx: 0,
   isPanelHidden: localStorage.getItem("lbPanelHidden") === "true",
+};
+
+const LINK_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+
+// Shared in-flight/result cache for TweetDetail fetches. Used by both the
+// auto-expand (for truncated longform tweets) and the "Show thread" button so
+// opening the lightbox and then clicking "Show thread" only hits /thread once.
+const threadCache = new Map();
+const fetchThreadOnce = (tweetId) => {
+  if (threadCache.has(tweetId)) return threadCache.get(tweetId);
+  const promise = fetch(`/thread?id=${encodeURIComponent(tweetId)}`)
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .catch((err) => {
+      threadCache.delete(tweetId); // let failures retry next time
+      throw err;
+    });
+  threadCache.set(tweetId, promise);
+  return promise;
+};
+
+// Longform tweets carry a t.co "show more" self-URL at the end of full_text when
+// X doesn't return note_tweet body. That tail is the classic truncation marker.
+const LONGFORM_TAIL_REGEX = /https?:\/\/t\.co\/\S+\s*$/;
+const looksTruncated = (bm) => {
+  if (bm.textIsTruncated === true) return true; // explicit flag from new sync
+  if (bm.textIsTruncated === false) return false;
+  return LONGFORM_TAIL_REGEX.test(bm.text || ""); // old-data heuristic
+};
+
+// URL chips: unique expanded URLs linked from the tweet, capped at 3
+const buildUrlsHtml = (urls) => {
+  if (!Array.isArray(urls) || urls.length === 0) return "";
+  const seen = new Set();
+  const unique = [];
+  for (const u of urls) {
+    if (!u?.expanded || seen.has(u.expanded)) continue;
+    seen.add(u.expanded);
+    unique.push(u);
+    if (unique.length >= 3) break;
+  }
+  if (!unique.length) return "";
+  return `<div class="lb-urls">${unique.map((u) => `
+    <a href="${escapeHtml(u.expanded)}" target="_blank" class="lb-url-chip" title="${escapeHtml(u.expanded)}">
+      ${LINK_ICON}<span>${escapeHtml(u.display || hostnameOf(u.expanded) || u.expanded)}</span>
+    </a>`).join("")}</div>`;
+};
+
+// Link preview card (from X's `card.legacy` binding_values)
+const buildCardPreviewHtml = (card) => {
+  if (!card) return "";
+  const href = card.url || "#";
+  const domain = card.vanityUrl || hostnameOf(card.url);
+  const imgHtml = card.image?.url
+    ? `<div class="lb-card-img"><img src="${escapeHtml(card.image.url)}" alt="" loading="lazy"></div>`
+    : "";
+  return `
+    <a href="${escapeHtml(href)}" target="_blank" class="lb-card-preview">
+      ${imgHtml}
+      <div class="lb-card-body">
+        ${domain ? `<span class="lb-card-domain">${escapeHtml(domain)}</span>` : ""}
+        ${card.title ? `<span class="lb-card-title">${escapeHtml(card.title)}</span>` : ""}
+        ${card.description ? `<span class="lb-card-desc">${escapeHtml(card.description)}</span>` : ""}
+      </div>
+    </a>
+  `;
+};
+
+// Compact embedded view of a quoted tweet
+const buildQuotedHtml = (q) => {
+  if (!q) return "";
+  const text = (q.text || "").replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+  const thumb = q.images?.[0];
+  const thumbHtml = thumb
+    ? `<img class="lb-quoted-thumb" src="${escapeHtml(twitterImageUrl(thumb.url, "small"))}" alt="" loading="lazy">`
+    : "";
+  return `
+    <a href="${escapeHtml(q.url)}" target="_blank" class="lb-quoted">
+      <div class="lb-quoted-head">
+        <img class="lb-quoted-avatar" src="${escapeHtml(q.authorAvatar)}" alt="">
+        <span class="lb-quoted-name">${escapeHtml(q.authorName)}</span>
+        <span class="lb-quoted-handle">@${escapeHtml(q.authorHandle)}</span>
+      </div>
+      ${text ? `<p class="lb-quoted-text">${escapeHtml(text)}</p>` : ""}
+      ${thumbHtml}
+    </a>
+  `;
+};
+
+const renderThreadTweet = (t, isFocal) => {
+  const text = (t.text || "").replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+  const img = t.images?.[0];
+  const imgHtml = img
+    ? `<img class="lb-thread-thumb" src="${escapeHtml(twitterImageUrl(img.url, "small"))}" alt="" loading="lazy">`
+    : "";
+  return `
+    <a href="${escapeHtml(t.url)}" target="_blank" class="lb-thread-item${isFocal ? " lb-thread-item--focal" : ""}">
+      <img class="lb-thread-avatar" src="${escapeHtml(t.authorAvatar)}" alt="">
+      <div class="lb-thread-body">
+        <div class="lb-thread-head">
+          <span class="lb-thread-name">${escapeHtml(t.authorName)}</span>
+          <span class="lb-thread-handle">@${escapeHtml(t.authorHandle)}</span>
+        </div>
+        ${text ? `<p class="lb-thread-text">${escapeHtml(text)}</p>` : ""}
+        ${imgHtml}
+      </div>
+    </a>
+  `;
+};
+
+// Unfurl a truncated longform tweet in-place by pulling the note_tweet body
+// out of TweetDetail. Bails if the lightbox was closed or switched during the
+// fetch, and shares a cache with the "Show thread" button so we don't round-trip
+// twice. Silent on failure — "Show thread" remains a manual fallback.
+const maybeAutoExpandLongForm = async (root, bookmark) => {
+  if (!looksTruncated(bookmark)) return;
+
+  let data;
+  try { data = await fetchThreadOnce(bookmark.id); }
+  catch (err) { console.warn("auto-expand failed:", err); return; }
+
+  const focal = data?.tweets?.find?.((t) => t.id === bookmark.id);
+  if (!focal || !focal.text) return;
+  if (focal.text.length <= (bookmark.text || "").length) return;
+
+  // If the user moved on to another bookmark while we were fetching, skip.
+  if (lbState.lightboxItem?.bookmark?.id !== bookmark.id) return;
+
+  // Write back onto the live bookmark so share/copy and re-renders see the full text
+  bookmark.text = focal.text;
+  if (focal.urls?.length) bookmark.urls = focal.urls;
+  if (focal.card && !bookmark.card) bookmark.card = focal.card;
+  if (focal.quotedTweet && !bookmark.quotedTweet) bookmark.quotedTweet = focal.quotedTweet;
+
+  const cleanText = focal.text.replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+  const textEl = root.querySelector(".lb-details-text");
+  if (textEl) {
+    textEl.textContent = cleanText;
+  }
+
+  // Refresh URL chips if the unfurled text carries new expanded URLs
+  if (focal.urls?.length) {
+    const newChipsHtml = buildUrlsHtml(focal.urls);
+    const existing = root.querySelector(".lb-urls");
+    if (existing) {
+      existing.outerHTML = newChipsHtml;
+    } else if (newChipsHtml && textEl) {
+      textEl.insertAdjacentHTML("afterend", newChipsHtml);
+    }
+  }
+};
+
+// Fetches the thread via /thread?id=… on first click and replaces the button
+// with the rendered conversation. Errors surface inline with a retry window.
+const wireThreadButton = (root, bookmark) => {
+  const btn = root.querySelector(".lb-thread-btn");
+  const container = root.querySelector(".lb-thread");
+  if (!btn || !container) return;
+
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const label = btn.querySelector(".lb-thread-btn-label");
+    if (label) label.textContent = "Loading thread…";
+
+    try {
+      const { tweets } = await fetchThreadOnce(bookmark.id);
+      if (!Array.isArray(tweets) || tweets.length === 0) {
+        if (label) label.textContent = "No thread available";
+        return;
+      }
+      // If only the focal tweet came back, there's no real thread to show
+      const others = tweets.filter((t) => t.id !== bookmark.id);
+      if (others.length === 0) {
+        if (label) label.textContent = "No thread available";
+        return;
+      }
+      container.innerHTML = tweets.map((t) => renderThreadTweet(t, t.id === bookmark.id)).join("");
+      container.hidden = false;
+      btn.hidden = true;
+    } catch (err) {
+      console.warn("Thread fetch failed:", err);
+      if (label) label.textContent = "Thread unavailable — tap to retry";
+      setTimeout(() => {
+        btn.disabled = false;
+        if (label) label.textContent = "Show thread";
+      }, 2500);
+    }
+  });
 };
 
 let lightboxClone = null;
@@ -135,9 +328,87 @@ export const lbCarouselGoTo = (images, idx) => {
   updateLbActions(imgData);
 };
 
+const formatStatCount = (n) => {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+};
+
+// Text-only variant: a centered modal (no image clone, no spring-from-grid
+// animation). Reuses the same URL / card / quoted / thread UI as the media
+// lightbox's side panel so the two stay visually coherent.
+const openTextLightbox = (el, bookmark) => {
+  lbState.lightboxAnimating = true;
+  lbState.lightboxOpen = true;
+  lbState.lightboxItem = { element: el, bookmark, isTextOnly: true };
+
+  const cleanText = (bookmark.text || "").replace(/https?:\/\/t\.co\/\S+/g, "").trim();
+  const dateStr = bookmark.postedAt
+    ? new Date(bookmark.postedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+    : "";
+  const urlsHtml = buildUrlsHtml(bookmark.urls);
+  const cardHtml = buildCardPreviewHtml(bookmark.card);
+  const quotedHtml = buildQuotedHtml(bookmark.quotedTweet);
+
+  // Hide the reusable side-panel element — text-only mode uses its own modal
+  const sidePanel = document.getElementById("lightbox-info");
+  if (sidePanel) sidePanel.classList.remove("lb-side-panel", "lb-bottom-panel");
+
+  lightboxClone = document.createElement("div");
+  lightboxClone.className = "lb-text-modal";
+  lightboxClone.innerHTML = `
+    <div class="lb-text-modal-inner">
+      <div class="lb-details-scroll-content">
+        <div class="lb-details-author">
+          <img class="lb-details-avatar" src="${escapeHtml(bookmark.authorAvatar)}" alt="">
+          <div class="lb-details-author-text">
+            <a href="https://x.com/${escapeHtml(bookmark.authorHandle)}" target="_blank" class="lb-details-name">${escapeHtml(bookmark.authorName)}</a>
+            <span class="lb-details-handle">@${escapeHtml(bookmark.authorHandle)}</span>
+          </div>
+          <a href="${escapeHtml(bookmark.url)}" target="_blank" class="lb-details-twitter-link" title="Open on Twitter">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          </a>
+        </div>
+        ${cleanText ? `<p class="lb-details-text">${escapeHtml(cleanText)}</p>` : ""}
+        ${urlsHtml}
+        ${cardHtml}
+        ${quotedHtml}
+        <div class="lb-details-meta">
+          ${dateStr ? `<span class="lb-details-date">${dateStr}</span>` : ""}
+          <div class="lb-details-stats">
+            ${bookmark.replyCount > 0 ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> ${formatStatCount(bookmark.replyCount)}</span>` : ""}
+            ${bookmark.repostCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ${formatStatCount(bookmark.repostCount)}</span>` : ""}
+            ${bookmark.quoteCount > 0 ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 .985 0 1 0 1 1v1c0 1-1 2-2 2-1 0-1 .008-1 1.031V20c0 1 0 1 1 1z"/></svg> ${formatStatCount(bookmark.quoteCount)}</span>` : ""}
+            ${bookmark.likeCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> ${formatStatCount(bookmark.likeCount)}</span>` : ""}
+            ${bookmark.bookmarkCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg> ${formatStatCount(bookmark.bookmarkCount)}</span>` : ""}
+          </div>
+        </div>
+        <button class="lb-thread-btn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="lb-thread-btn-label">Show thread</span>
+        </button>
+        <div class="lb-thread" hidden></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(lightboxClone);
+  dom.overlay.classList.add("active");
+
+  wireThreadButton(lightboxClone, bookmark);
+  maybeAutoExpandLongForm(lightboxClone, bookmark);
+
+  Motion.animate(
+    lightboxClone,
+    { opacity: [0, 1], transform: ["scale(0.97)", "scale(1)"] },
+    { duration: 0.2, easing: "ease-out" }
+  ).then(() => { lbState.lightboxAnimating = false; });
+};
+
 export const openLightbox = (el, bookmark) => {
   if (lbState.lightboxOpen || lbState.lightboxAnimating) return;
-  if (!bookmark.images || bookmark.images.length === 0) return;
+  const hasMedia = bookmark.images && bookmark.images.length > 0;
+  if (!hasMedia) { openTextLightbox(el, bookmark); return; }
 
   lbState.lightboxAnimating = true;
   lbState.lightboxOpen = true;
@@ -312,6 +583,9 @@ export const openLightbox = (el, bookmark) => {
   const dateStr = bookmark.postedAt ? new Date(bookmark.postedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "";
 
   const lightboxInfo = document.getElementById("lightbox-info");
+  const urlsHtml = buildUrlsHtml(bookmark.urls);
+  const cardHtml = buildCardPreviewHtml(bookmark.card);
+  const quotedHtml = buildQuotedHtml(bookmark.quotedTweet);
   lightboxInfo.innerHTML = `
     ${PANEL_W > 0 ? `<button class="lb-details-hide-btn" aria-label="Hide panel">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -328,16 +602,28 @@ export const openLightbox = (el, bookmark) => {
         </a>
       </div>
       ${cleanText ? `<p class="lb-details-text">${escapeHtml(cleanText)}</p>` : ""}
+      ${urlsHtml}
+      ${cardHtml}
+      ${quotedHtml}
       <div class="lb-details-meta">
         ${dateStr ? `<span class="lb-details-date">${dateStr}</span>` : ""}
         <div class="lb-details-stats">
+          ${bookmark.replyCount > 0 ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> ${formatCount(bookmark.replyCount)}</span>` : ""}
           ${bookmark.repostCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ${formatCount(bookmark.repostCount)}</span>` : ""}
+          ${bookmark.quoteCount > 0 ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 .985 0 1 0 1 1v1c0 1-1 2-2 2-1 0-1 .008-1 1.031V20c0 1 0 1 1 1z"/></svg> ${formatCount(bookmark.quoteCount)}</span>` : ""}
           ${bookmark.likeCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> ${formatCount(bookmark.likeCount)}</span>` : ""}
           ${bookmark.bookmarkCount != null ? `<span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg> ${formatCount(bookmark.bookmarkCount)}</span>` : ""}
         </div>
       </div>
+      <button class="lb-thread-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="lb-thread-btn-label">Show thread</span>
+      </button>
+      <div class="lb-thread" hidden></div>
     </div>
   `;
+  wireThreadButton(lightboxInfo, bookmark);
+  maybeAutoExpandLongForm(lightboxInfo, bookmark);
   if (PANEL_W > 0) {
     const shownB = boundsOptions.shown;
     lightboxInfo.style.left = `${shownB.endX + shownB.targetW + GAP}px`;
@@ -445,6 +731,25 @@ export const closeLightbox = () => {
   if (!lbState.lightboxOpen || lbState.lightboxAnimating || !lbState.lightboxItem) return;
 
   lbState.lightboxAnimating = true;
+
+  // Text-only modal: no grid-item animation to reverse — fade out and drop
+  if (lbState.lightboxItem.isTextOnly) {
+    dom.overlay.classList.remove("active");
+    Motion.animate(
+      lightboxClone,
+      { opacity: [1, 0], transform: ["scale(1)", "scale(0.97)"] },
+      { duration: 0.16, easing: "ease-in" }
+    ).then(() => {
+      lightboxClone?.remove();
+      lightboxClone = null;
+      lbActionsEl = null;
+      lbState.lightboxOpen = false;
+      lbState.lightboxItem = null;
+      lbState.lightboxAnimating = false;
+    });
+    return;
+  }
+
   const { element: el } = lbState.lightboxItem;
 
   // Don't pause the reused grid video — it should keep playing in the grid
