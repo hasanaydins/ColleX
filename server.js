@@ -88,87 +88,340 @@ const serveVideoFromDisk = (cachePath, req, res) => {
   });
 };
 
-// Cache-miss: stream from upstream to client AND tee to disk
-const streamVideoUpstream = (videoUrl, cacheDir, req, res) => {
-  const cachePath = videoCachePathFor(cacheDir, videoUrl);
-  const tmpPath = cachePath + ".tmp";
+const UPSTREAM_CONNECT_TIMEOUT_MS = 30000;
+const UPSTREAM_IDLE_TIMEOUT_MS = 60000;
+const MAX_CONCURRENT_VIDEO_DL = 3;
 
-  // Only start a disk writer if no other request is already caching this URL
-  let diskStream = null;
-  let diskFailed = false;
-  if (!inflightCacheWrites.has(cachePath) && !fs.existsSync(cachePath)) {
-    try {
-      diskStream = fs.createWriteStream(tmpPath, { flags: "w" });
-      inflightCacheWrites.add(cachePath);
-      diskStream.on("error", () => { diskFailed = true; });
-    } catch {
-      diskStream = null;
-    }
+let _activeDlCount = 0;
+const _dlQueue = [];
+
+const _acquireSlot = (cb) => {
+  if (_activeDlCount < MAX_CONCURRENT_VIDEO_DL) { _activeDlCount++; cb(); return; }
+  _dlQueue.push(cb);
+};
+
+const _releaseSlot = () => {
+  _activeDlCount--;
+  if (_dlQueue.length > 0 && _activeDlCount < MAX_CONCURRENT_VIDEO_DL) {
+    _activeDlCount++;
+    _dlQueue.shift()();
   }
+};
 
-  const abortDiskCache = () => {
-    if (!diskStream) return;
-    diskStream.destroy();
+const activeDownloads = new Map();
+// cachePath → {
+//   tmpPath, diskBytes, bytesReceived, totalBytes,
+//   done, failed, writer, _diskWaiters[], _slotReleased
+// }
+
+function _notifyDisk(dl) {
+  const ready = [];
+  const pending = [];
+  for (const w of dl._diskWaiters) {
+    if (dl.diskBytes >= w.needed || dl.done || dl.failed) ready.push(w);
+    else pending.push(w);
+  }
+  dl._diskWaiters = pending;
+  for (const w of ready) w.resolve();
+}
+
+function _waitForDisk(dl, needed) {
+  return new Promise((resolve) => {
+    if (dl.diskBytes >= needed || dl.done || dl.failed) { resolve(); return; }
+    dl._diskWaiters.push({ resolve, needed });
+  });
+}
+
+const _startDownload = (videoUrl, cacheDir, cachePath, tmpPath, teeRes) => {
+  const dl = {
+    tmpPath,
+    diskBytes: 0,
+    bytesReceived: 0,
+    totalBytes: 0,
+    done: false,
+    failed: false,
+    writer: null,
+    _diskWaiters: [],
+    _slotReleased: false,
+  };
+  activeDownloads.set(cachePath, dl);
+
+  let diskFailed = false;
+  let teeClosed = false;
+  if (teeRes) teeRes.on("close", () => { teeClosed = true; });
+
+  try {
+    dl.writer = fs.createWriteStream(tmpPath, { flags: "w" });
+    inflightCacheWrites.add(cachePath);
+    dl.writer.on("error", () => { diskFailed = true; });
+  } catch { dl.writer = null; }
+
+  const abort = () => {
+    if (dl.writer) { dl.writer.destroy(); dl.writer = null; }
     inflightCacheWrites.delete(cachePath);
     try { fs.unlinkSync(tmpPath); } catch {}
-    diskStream = null;
+    dl.failed = true;
+    activeDownloads.delete(cachePath);
+    _notifyDisk(dl);
+    if (!dl._slotReleased) { dl._slotReleased = true; _releaseSlot(); }
   };
 
-  let clientClosed = false;
-  res.on("close", () => { clientClosed = true; });
-
   const doFetch = (url) => {
-    https.get(url, (upstream) => {
+    const upstreamReq = https.get(url, { timeout: UPSTREAM_CONNECT_TIMEOUT_MS }, (upstream) => {
       if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
         upstream.resume();
         return doFetch(upstream.headers.location);
       }
       if (upstream.statusCode !== 200) {
-        abortDiskCache();
-        if (!clientClosed) { res.writeHead(upstream.statusCode || 502); res.end(); }
+        if (teeRes && !teeRes.headersSent && !teeClosed) {
+          try { teeRes.writeHead(upstream.statusCode || 502); } catch {}
+          try { teeRes.end(); } catch {}
+        }
+        abort();
         return;
       }
 
-      if (!clientClosed) {
-        res.writeHead(upstream.statusCode, {
-          "Content-Type": upstream.headers["content-type"] || "video/mp4",
-          "Content-Length": upstream.headers["content-length"],
+      dl.totalBytes = parseInt(upstream.headers["content-length"] || "0", 10) || 0;
+
+      if (teeRes && !teeRes.headersSent && !teeClosed) {
+        teeRes.writeHead(206, {
+          "Content-Range": `bytes 0-${dl.totalBytes - 1}/${dl.totalBytes}`,
           "Accept-Ranges": "bytes",
+          "Content-Length": dl.totalBytes,
+          "Content-Type": "video/mp4",
           "Cache-Control": "public, max-age=86400",
         });
       }
 
+      upstream.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => {
+        upstream.destroy(new Error("upstream idle timeout"));
+      });
+
       upstream.on("data", (chunk) => {
-        if (diskStream && !diskFailed) diskStream.write(chunk);
-        if (!clientClosed) res.write(chunk);
+        dl.bytesReceived += chunk.length;
+
+        if (dl.writer && !diskFailed) {
+          const canDrain = dl.writer.write(chunk, () => {
+            dl.diskBytes += chunk.length;
+            _notifyDisk(dl);
+          });
+          if (!canDrain) {
+            upstream.pause();
+            dl.writer.once("drain", () => upstream.resume());
+          }
+        }
+
+        if (teeRes && !teeClosed && !teeRes.writableEnded && !teeRes.destroyed) {
+          teeRes.write(chunk);
+        }
       });
 
       upstream.on("end", () => {
-        if (diskStream && !diskFailed) {
-          diskStream.end(() => {
+        if (teeRes && !teeClosed && !teeRes.writableEnded && !teeRes.destroyed) {
+          try { teeRes.end(); } catch {}
+        }
+
+        const complete = dl.totalBytes > 0 && dl.bytesReceived === dl.totalBytes;
+        if (dl.writer && !diskFailed && complete) {
+          dl.writer.end(() => {
+            dl.diskBytes = dl.bytesReceived;
+            _notifyDisk(dl);
             fs.rename(tmpPath, cachePath, (err) => {
               inflightCacheWrites.delete(cachePath);
-              if (!err) scheduleVideoCacheCleanup(cacheDir);
-              else { try { fs.unlinkSync(tmpPath); } catch {} }
+              if (!err) {
+                scheduleVideoCacheCleanup(cacheDir);
+                dl.done = true;
+                _notifyDisk(dl);
+                if (!dl._slotReleased) { dl._slotReleased = true; _releaseSlot(); }
+                setTimeout(() => activeDownloads.delete(cachePath), 10000);
+              } else {
+                try { fs.unlinkSync(tmpPath); } catch {}
+                abort();
+              }
             });
           });
         } else {
-          abortDiskCache();
+          abort();
         }
-        if (!clientClosed) res.end();
       });
 
       upstream.on("error", () => {
-        abortDiskCache();
-        if (!clientClosed) res.end();
+        if (teeRes && !teeClosed && !teeRes.writableEnded && !teeRes.destroyed) {
+          try { teeRes.end(); } catch {}
+        }
+        abort();
       });
-    }).on("error", () => {
-      abortDiskCache();
-      if (!clientClosed) { res.writeHead(502); res.end("Upstream error"); }
+    });
+
+    upstreamReq.on("timeout", () => {
+      upstreamReq.destroy(new Error("upstream connect timeout"));
+    });
+    upstreamReq.on("error", () => {
+      if (teeRes && !teeClosed) {
+        if (!teeRes.headersSent) { try { teeRes.writeHead(504); } catch {} }
+        try { teeRes.end(); } catch {}
+      }
+      abort();
     });
   };
 
   doFetch(videoUrl);
+  return dl;
+};
+
+const _serveFromTmp = async (tmpPath, dl, req, res) => {
+  let clientClosed = false;
+  res.on("close", () => { clientClosed = true; });
+
+  await _waitForDisk(dl, 1);
+  if (dl.failed && dl.diskBytes === 0) {
+    if (!clientClosed) { try { res.writeHead(502); } catch {} try { res.end(); } catch {} }
+    return;
+  }
+
+  const totalSize = dl.totalBytes > 0 ? dl.totalBytes : dl.diskBytes;
+  const range = req.headers.range;
+
+  if (range) {
+    const m = /bytes=(\d*)-(\d*)/.exec(range);
+    if (!m) {
+      if (!clientClosed) {
+        res.writeHead(416, { "Content-Range": `bytes */${totalSize}` });
+        res.end();
+      }
+      return;
+    }
+
+    const start = m[1] ? parseInt(m[1], 10) : 0;
+    const endReq = m[2] ? parseInt(m[2], 10) : totalSize - 1;
+
+    if (start >= totalSize) {
+      if (!clientClosed) {
+        res.writeHead(416, { "Content-Range": `bytes */${totalSize}` });
+        res.end();
+      }
+      return;
+    }
+
+    await _waitForDisk(dl, start + 1);
+    if (dl.failed && start >= dl.diskBytes) {
+      if (!clientClosed) { try { res.writeHead(502); } catch {} try { res.end(); } catch {} }
+      return;
+    }
+
+    const actualEnd = Math.min(endReq, dl.diskBytes - 1);
+    if (start > actualEnd) {
+      if (!clientClosed) {
+        res.writeHead(416, { "Content-Range": `bytes */${totalSize}` });
+        res.end();
+      }
+      return;
+    }
+
+    const contentLength = actualEnd - start + 1;
+    if (!clientClosed) {
+      res.writeHead(206, {
+        "Content-Range": `bytes ${start}-${actualEnd}/${totalSize}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": contentLength,
+        "Content-Type": "video/mp4",
+        "Cache-Control": dl.done ? "public, max-age=31536000, immutable" : "public, max-age=86400",
+      });
+      fs.createReadStream(tmpPath, { start, end: actualEnd }).pipe(res);
+    }
+  } else {
+    if (!clientClosed) {
+      const headers = {
+        "Content-Type": "video/mp4",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=86400",
+      };
+      if (dl.totalBytes > 0) headers["Content-Length"] = dl.totalBytes;
+      res.writeHead(200, headers);
+    }
+
+    let offset = 0;
+    const CHUNK = 256 * 1024;
+
+    while (!clientClosed && !res.writableEnded && !res.destroyed) {
+      if (offset >= dl.diskBytes) {
+        if (dl.done || dl.failed) break;
+        await _waitForDisk(dl, offset + 1);
+        continue;
+      }
+
+      const readEnd = Math.min(offset + CHUNK - 1, dl.diskBytes - 1);
+
+      try {
+        await new Promise((resolve, reject) => {
+          const stream = fs.createReadStream(tmpPath, { start: offset, end: readEnd });
+          stream.on("data", (chunk) => {
+            offset += chunk.length;
+            if (!clientClosed && !res.destroyed) res.write(chunk);
+          });
+          stream.on("end", resolve);
+          stream.on("error", reject);
+        });
+      } catch { break; }
+
+      if (offset >= dl.diskBytes && !dl.done && !dl.failed) {
+        await _waitForDisk(dl, offset + 1);
+      }
+    }
+
+    if (!clientClosed && !res.writableEnded && !res.destroyed) {
+      try { res.end(); } catch {}
+    }
+  }
+};
+
+const streamVideoUpstream = (videoUrl, cacheDir, req, res, isPriority = false) => {
+  const cachePath = videoCachePathFor(cacheDir, videoUrl);
+  const tmpPath = cachePath + ".tmp";
+
+  const existing = activeDownloads.get(cachePath);
+  if (existing) {
+    _serveFromTmp(tmpPath, existing, req, res);
+    return;
+  }
+
+  if (fs.existsSync(tmpPath) && !inflightCacheWrites.has(cachePath)) {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+
+  const range = req.headers.range;
+  let startByte = 0;
+  if (range) {
+    const m = /bytes=(\d*)-/.exec(range);
+    if (m && m[1]) startByte = parseInt(m[1], 10);
+  }
+
+  const launch = () => {
+    const existingAfter = activeDownloads.get(cachePath);
+    if (existingAfter) {
+      if (!isPriority) _releaseSlot();
+      _serveFromTmp(tmpPath, existingAfter, req, res);
+      return;
+    }
+
+    if (res.writableEnded || res.destroyed) {
+      if (!isPriority) _releaseSlot();
+      return;
+    }
+
+    if (startByte === 0) {
+      _startDownload(videoUrl, cacheDir, cachePath, tmpPath, res);
+    } else {
+      const dl = _startDownload(videoUrl, cacheDir, cachePath, tmpPath, null);
+      _serveFromTmp(tmpPath, dl, req, res);
+    }
+  };
+
+  if (isPriority) {
+    launch();
+  } else {
+    _acquireSlot(launch);
+  }
 };
 
 // In-memory OG cache
@@ -231,12 +484,24 @@ function createServer(port, dataDir) {
   const VIDEO_CACHE_DIR = path.join(DATA_DIR, "video-cache");
   try { fs.mkdirSync(VIDEO_CACHE_DIR, { recursive: true }); } catch {}
 
+  // Purge orphan .tmp files left behind by downloads that were interrupted
+  // by a crash, force-quit, or a network drop between the upstream 'end' and
+  // the rename. Leaving them there wastes disk and confuses the LRU sweeper.
+  try {
+    for (const f of fs.readdirSync(VIDEO_CACHE_DIR)) {
+      if (f.endsWith(".tmp")) {
+        try { fs.unlinkSync(path.join(VIDEO_CACHE_DIR, f)); } catch {}
+      }
+    }
+  } catch {}
+
   const server = http.createServer(async (req, res) => {
     const parsed = new URL(req.url, `http://localhost:${port}`);
 
     // Proxy Twitter video requests (with persistent disk cache)
     if (parsed.pathname === "/proxy-video") {
       const videoUrl = parsed.searchParams.get("url");
+      const isPriority = parsed.searchParams.get("priority") === "1";
       if (!videoUrl || !videoUrl.startsWith("https://video.twimg.com/")) {
         res.writeHead(400);
         res.end("Invalid video URL");
@@ -245,7 +510,7 @@ function createServer(port, dataDir) {
       const cachePath = videoCachePathFor(VIDEO_CACHE_DIR, videoUrl);
       fs.access(cachePath, fs.constants.R_OK, (err) => {
         if (!err) serveVideoFromDisk(cachePath, req, res);
-        else streamVideoUpstream(videoUrl, VIDEO_CACHE_DIR, req, res);
+        else streamVideoUpstream(videoUrl, VIDEO_CACHE_DIR, req, res, isPriority);
       });
       return;
     }
@@ -262,8 +527,9 @@ function createServer(port, dataDir) {
       let clientClosed = false;
       res.on("close", () => { clientClosed = true; });
 
+      const IMAGE_TIMEOUT_MS = 15000;
       const doFetch = (url, redirects) => {
-        https.get(url, (upstream) => {
+        const req2 = https.get(url, { timeout: IMAGE_TIMEOUT_MS }, (upstream) => {
           if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
             upstream.resume();
             if (redirects >= 3) { if (!clientClosed) { res.writeHead(502); res.end(); } return; }
@@ -281,10 +547,20 @@ function createServer(port, dataDir) {
               "Cache-Control": "public, max-age=86400",
             });
           }
+          upstream.setTimeout(IMAGE_TIMEOUT_MS, () => {
+            upstream.destroy(new Error("upstream idle timeout"));
+          });
           upstream.pipe(res);
           upstream.on("error", () => { if (!clientClosed) res.end(); });
-        }).on("error", () => {
-          if (!clientClosed) { res.writeHead(502); res.end("Upstream error"); }
+        });
+        req2.on("timeout", () => {
+          req2.destroy(new Error("upstream connect timeout"));
+        });
+        req2.on("error", () => {
+          if (!clientClosed) {
+            try { res.writeHead(504); res.end("Upstream timeout"); }
+            catch { try { res.end(); } catch {} }
+          }
         });
       };
       doFetch(imageUrl, 0);

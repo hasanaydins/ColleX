@@ -72,14 +72,11 @@ export const triggerAnchorDownload = (href, filename) => {
 };
 
 export const downloadImage = async (url, filename) => {
-  // Same-origin proxy URLs → direct download, no blob buffering needed
   if (url.startsWith("/")) {
     triggerAnchorDownload(url, filename);
-    // Give browser time to register the download before next
     await new Promise(r => setTimeout(r, 800));
     return;
   }
-  // Cross-origin (Twitter CDN) → fetch as blob for reliable Save As
   try {
     const resp = await fetch(url);
     const blob = await resp.blob();
@@ -136,11 +133,63 @@ export const mediaDownloadUrl = (img) => {
   return { url: `/proxy-image?url=${encodeURIComponent(twitterImageUrl(img.url, "4096x4096"))}`, ext: "jpg" };
 };
 
-// Fetch a URL as Blob (same-origin proxy or cross-origin)
+const FETCH_BLOB_TIMEOUT_MS = 30000;
+
 export const fetchBlob = async (url) => {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Fetch failed ${resp.status}`);
-  return resp.blob();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_BLOB_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    if (!resp.ok) throw new Error(`Fetch failed ${resp.status}`);
+    return await resp.blob();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const FETCH_VIDEO_TIMEOUT_MS = 120000;
+
+export const fetchBlobWithProgress = async (url, onProgress, { signal: externalSignal } = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_VIDEO_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    if (!resp.ok) throw new Error(`Fetch failed ${resp.status}`);
+
+    const contentLength = parseInt(resp.headers.get("Content-Length") || "0", 10);
+
+    if (!resp.body || contentLength === 0) {
+      if (onProgress) onProgress(-1);
+      const blob = await resp.blob();
+      if (onProgress) onProgress(100);
+      return blob;
+    }
+
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (onProgress) onProgress(Math.round((received / contentLength) * 100));
+    }
+
+    if (onProgress) onProgress(100);
+    return new Blob(chunks, { type: resp.headers.get("Content-Type") || "video/mp4" });
+  } finally {
+    clearTimeout(timeoutId);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+  }
 };
 
 // Build a ZIP from a list of bookmarks. Fires onProgress events.

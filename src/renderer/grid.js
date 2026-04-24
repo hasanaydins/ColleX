@@ -6,6 +6,7 @@ import { loadOgCard, mediaHeight } from './media.js';
 import { selectState, toggleCardSelected } from './select.js';
 import { openLightbox } from './lightbox.js';
 import { primaryLinkFor } from './helpers.js';
+import { setGridEl, enqueueVideo } from './video-queue.js';
 
 // Wire the link-preview thumbnail so clicking it opens the lightbox instead
 // of navigating away. The lightbox already shows the link card with a
@@ -19,7 +20,6 @@ const wireOgClick = (item, bm) => {
 // Single shared IntersectionObserver for all video autoplay — much cheaper than one per card
 let videoObserver = null;
 
-// Bind a one-time "playing" listener to fade out the loader spinner
 const bindVideoLoader = (videoEl) => {
   const loader = videoEl.parentElement?.querySelector(".video-loader");
   if (!loader) return;
@@ -34,8 +34,11 @@ const getVideoObserver = () => {
     for (const entry of entries) {
       const v = entry.target;
       if (entry.isIntersecting) {
-        if (!v.src) v.src = v.dataset.src;
-        v.play().catch(() => {});
+        if (!v.src && v.dataset.src) {
+          enqueueVideo(v);
+        } else if (v.src) {
+          v.play().catch(() => {});
+        }
       } else {
         v.pause();
       }
@@ -227,10 +230,10 @@ const setupCardInteractions = (item, bm, hasMedia, sharedVideoObserver) => {
 
 export const renderGrid = () => {
   dom.grid.innerHTML = "";
-  // Reset grid classes
   dom.grid.className = "";
   dom.grid.id = "grid";
   dom.grid.style.removeProperty("--card-cols");
+  setGridEl(dom.grid);
 
   const sharedVideoObserver = getVideoObserver();
 

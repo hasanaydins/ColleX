@@ -2,6 +2,7 @@
 
 import { escapeHtml, hostnameOf, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { buildMediaHtml, downloadImage, copyImageToClipboard, bookmarkFilename, mediaDownloadUrl, triggerAnchorDownload, bookmarksToZip } from './media.js';
+import { startDownload } from './downloads.js';
 import { state } from './state.js';
 
 // --- Stats row (reply, repost, quote, like, bookmark) ---
@@ -261,7 +262,60 @@ export const addCardActions = (mediaWrap, images, bm) => {
     dlBtn.className = "card-action-btn";
     dlBtn.title = isVideo ? "Download video" : "Download image";
     dlBtn.innerHTML = DL_ICON;
-    dlBtn.addEventListener("click", (e) => { e.stopPropagation(); downloadImage(dlUrl, filename); });
+    if (isVideo) {
+      const origHtml = dlBtn.innerHTML;
+      dlBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (dlBtn.disabled) return;
+        dlBtn.disabled = true;
+        dlBtn.classList.add("card-action-btn--downloading");
+        dlBtn.style.setProperty("--dl-progress", "0");
+        dlBtn.innerHTML = `${DL_ICON}<span class="dl-progress-text">0%</span>`;
+
+        const gridItem = dlBtn.closest('.grid-item, .card-view-item, .list-item');
+        if (gridItem) gridItem.classList.add('grid-item--downloading');
+
+        startDownload(dlUrl, filename, {
+          authorHandle: bm.authorHandle,
+          onProgress: (pct) => {
+            if (!document.contains(dlBtn)) return;
+            if (pct < 0) {
+              dlBtn.style.removeProperty("--dl-progress");
+              dlBtn.innerHTML = `${DL_ICON}<span class="dl-progress-text">…</span>`;
+            } else {
+              dlBtn.style.setProperty("--dl-progress", String(pct));
+              dlBtn.querySelector(".dl-progress-text").textContent = `${pct}%`;
+            }
+          },
+          onComplete: () => {
+            if (!document.contains(dlBtn)) return;
+            dlBtn.style.setProperty("--dl-progress", "100");
+            dlBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span class="dl-progress-text">OK</span>`;
+            dlBtn.style.color = "#4ade80";
+            const item = dlBtn.closest('.grid-item, .card-view-item, .list-item');
+            if (item) item.classList.remove('grid-item--downloading');
+            setTimeout(() => {
+              dlBtn.innerHTML = origHtml;
+              dlBtn.style.color = "";
+              dlBtn.style.removeProperty("--dl-progress");
+              dlBtn.classList.remove("card-action-btn--downloading");
+              dlBtn.disabled = false;
+            }, 1500);
+          },
+          onError: () => {
+            if (!document.contains(dlBtn)) return;
+            dlBtn.innerHTML = origHtml;
+            dlBtn.style.removeProperty("--dl-progress");
+            dlBtn.classList.remove("card-action-btn--downloading");
+            dlBtn.disabled = false;
+            const item = dlBtn.closest('.grid-item, .card-view-item, .list-item');
+            if (item) item.classList.remove('grid-item--downloading');
+          },
+        });
+      });
+    } else {
+      dlBtn.addEventListener("click", (e) => { e.stopPropagation(); downloadImage(dlUrl, filename); });
+    }
     wrap.appendChild(dlBtn);
   }
 

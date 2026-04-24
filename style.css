@@ -190,6 +190,12 @@ body {
   pointer-events: auto;
 }
 
+.grid-item--downloading .card-actions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 /* Text-only cards: actions sit at bottom-right of the whole card */
 .card-actions--text-only {
   bottom: 10px;
@@ -230,6 +236,42 @@ body {
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
+}
+
+.card-action-btn--downloading {
+  width: auto;
+  min-width: 30px;
+  border-radius: 100px;
+  padding: 0 8px 0 6px;
+  gap: 4px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: conic-gradient(
+    rgba(59, 130, 246, 0.5) calc(var(--dl-progress, 0) * 1%),
+    rgba(0, 0, 0, 0.72) calc(var(--dl-progress, 0) * 1%)
+  );
+  display: flex;
+  align-items: center;
+}
+
+.dl-progress-text {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 22px;
+}
+
+.lb-actions .card-action-btn--downloading {
+  min-width: 36px;
+  font-size: 12px;
+  padding: 0 10px 0 7px;
+  background: conic-gradient(
+    rgba(59, 130, 246, 0.5) calc(var(--dl-progress, 0) * 1%),
+    rgba(0, 0, 0, 0.72) calc(var(--dl-progress, 0) * 1%)
+  );
+}
+
+.lb-actions .dl-progress-text {
+  font-size: 12px;
 }
 
 /* Lightbox action buttons — always visible, larger */
@@ -2237,6 +2279,20 @@ body {
   border-color: rgba(255, 255, 255, 0.18);
 }
 
+[data-theme="light"] .card-action-btn--downloading {
+  background: conic-gradient(
+    rgba(59, 130, 246, 0.6) calc(var(--dl-progress, 0) * 1%),
+    rgba(0, 0, 0, 0.75) calc(var(--dl-progress, 0) * 1%)
+  );
+}
+
+[data-theme="light"] .lb-actions .card-action-btn--downloading {
+  background: conic-gradient(
+    rgba(59, 130, 246, 0.6) calc(var(--dl-progress, 0) * 1%),
+    rgba(0, 0, 0, 0.75) calc(var(--dl-progress, 0) * 1%)
+  );
+}
+
 [data-theme="light"] .lb-carousel-btn {
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.2);
@@ -2609,4 +2665,208 @@ body {
 }
 .lb-ctx-item:hover svg {
   opacity: 1;
+}
+
+/* --- Download bar (footer) --- */
+.dl-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  width: 340px;
+  max-height: 260px;
+  background: rgba(18, 18, 18, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 150;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.dl-bar.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.dl-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dl-bar-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dl-bar-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(59, 130, 246, 0.9);
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 100px;
+  padding: 1px 7px;
+}
+
+.dl-bar-list {
+  overflow-y: auto;
+  max-height: 200px;
+  padding: 6px 0;
+}
+
+.dl-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  transition: background 0.1s ease;
+}
+
+.dl-bar-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dl-bar-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dl-bar-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-bar-item-handle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.dl-bar-item-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  width: 110px;
+}
+
+.dl-bar-item-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.dl-bar-item-fill {
+  height: 100%;
+  background: rgba(59, 130, 246, 0.85);
+  border-radius: 100px;
+  transition: width 0.15s ease;
+}
+
+.dl-bar-item-pct {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  min-width: 28px;
+  text-align: right;
+}
+
+.dl-bar-item--complete .dl-bar-item-fill {
+  background: rgba(74, 222, 128, 0.85);
+}
+
+.dl-bar-item--complete .dl-bar-item-pct {
+  color: #4ade80;
+}
+
+.dl-bar-item--error .dl-bar-item-pct {
+  color: #f87171;
+}
+
+.dl-bar-item--cancelled .dl-bar-item-pct {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.dl-bar-item-cancel {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.dl-bar-item-cancel:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+[data-theme="light"] .dl-bar {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .dl-bar-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .dl-bar-title {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="light"] .dl-bar-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .dl-bar-item-name {
+  color: rgba(0, 0, 0, 0.8);
+}
+
+[data-theme="light"] .dl-bar-item-handle {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .dl-bar-item-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .dl-bar-item-pct {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="light"] .dl-bar-item-cancel {
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .dl-bar-item-cancel:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }

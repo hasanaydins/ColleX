@@ -3,7 +3,9 @@
 import { dom } from './state.js';
 import { twitterImageUrl, escapeHtml, hostnameOf, primaryLinkFor, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { downloadImage, copyImageToClipboard, mediaDownloadUrl, bookmarkFilename } from './media.js';
+import { startDownload } from './downloads.js';
 import { buildShareButton } from './card.js';
+import { pauseAllGridVideos, resumeVisibleGridVideos } from './video-queue.js';
 
 export const lbState = {
   lightboxOpen: false,
@@ -278,7 +280,12 @@ const openMediaContextMenu = (e) => {
   });
   lbContextMenuEl.querySelector('[data-action="download"]')?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    downloadImage(mediaUrl, filename);
+    if (isVideo) {
+      const dlBtn = lbActionsEl?.querySelector(".lb-dl-btn");
+      if (dlBtn && !dlBtn.disabled) dlBtn.click();
+    } else {
+      downloadImage(mediaUrl, filename);
+    }
     closeContextMenu();
   });
 
@@ -305,7 +312,54 @@ const lbShowPhoto = (container, imgData, fit = "cover") => {
   container.appendChild(hiRes);
 };
 
-// Show a video slide inside the carousel (fresh element, autoplay)
+const priorityVideoUrl = (videoUrl) =>
+  `/proxy-video?url=${encodeURIComponent(videoUrl)}&priority=1`;
+
+const _wireVideoTimeout = (videoEl, poster, container, videoUrl, isGif, retryCount = 0) => {
+  const MAX_RETRIES = 2;
+  let played = false;
+  let retryTimer = null;
+
+  const onPlaying = () => {
+    played = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (poster) poster.style.opacity = "0";
+    if (videoEl.style.opacity === "0") videoEl.style.opacity = "1";
+  };
+
+  const doRetry = () => {
+    if (played || retryCount >= MAX_RETRIES) return;
+    retryCount++;
+    videoEl.pause();
+    videoEl.removeAttribute("src");
+    videoEl.load();
+
+    const freshVideo = document.createElement("video");
+    freshVideo.src = `${priorityVideoUrl(videoUrl)}&_retry=${retryCount}`;
+    freshVideo.controls = !isGif;
+    freshVideo.autoplay = true;
+    freshVideo.loop = isGif;
+    freshVideo.muted = isGif;
+    freshVideo.playsInline = true;
+    freshVideo.preload = "auto";
+    freshVideo.style.cssText = videoEl.style.cssText;
+    freshVideo.addEventListener("click", (e) => e.stopPropagation());
+    container.appendChild(freshVideo);
+    videoEl.remove();
+
+    _wireVideoTimeout(freshVideo, poster, container, videoUrl, isGif, retryCount);
+    freshVideo.play().catch(() => {});
+  };
+
+  videoEl.addEventListener("playing", onPlaying, { once: true });
+
+  retryTimer = setTimeout(() => {
+    if (!played && videoEl.readyState < 2) {
+      doRetry();
+    }
+  }, 5000);
+};
+
 const lbShowVideo = (container, imgData, fit = "contain") => {
   const isGif = imgData.type === "animated_gif";
 
@@ -315,7 +369,7 @@ const lbShowVideo = (container, imgData, fit = "contain") => {
   container.appendChild(poster);
 
   const video = document.createElement("video");
-  video.src = `/proxy-video?url=${encodeURIComponent(imgData.videoUrl)}`;
+  video.src = priorityVideoUrl(imgData.videoUrl);
   video.controls = !isGif;
   video.autoplay = true;
   video.loop = isGif;
@@ -323,9 +377,10 @@ const lbShowVideo = (container, imgData, fit = "contain") => {
   video.playsInline = true;
   video.preload = "auto";
   video.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};z-index:2;background:#111;`;
-  video.addEventListener("playing", () => { poster.style.opacity = "0"; }, { once: true });
   video.addEventListener("click", (e) => e.stopPropagation());
   container.appendChild(video);
+
+  _wireVideoTimeout(video, poster, container, imgData.videoUrl, isGif);
   video.play().catch(() => {});
 };
 
@@ -334,6 +389,52 @@ const lbShowMedia = (container, imgData, fit = "contain") => {
   const isVideo = (imgData.type === "video" || imgData.type === "animated_gif") && imgData.videoUrl;
   if (isVideo) lbShowVideo(container, imgData, fit);
   else lbShowPhoto(container, imgData, fit);
+};
+
+const DL_BTN_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+const CHECK_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+const wireVideoDownload = (btn, url, filename, authorHandle) => {
+  const origHtml = btn.innerHTML;
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add("card-action-btn--downloading");
+    btn.style.setProperty("--dl-progress", "0");
+    btn.innerHTML = `${DL_BTN_ICON}<span class="dl-progress-text">0%</span>`;
+
+    startDownload(url, filename, {
+      authorHandle,
+      onProgress: (pct) => {
+        if (pct < 0) {
+          btn.style.removeProperty("--dl-progress");
+          btn.innerHTML = `${DL_BTN_ICON}<span class="dl-progress-text">…</span>`;
+        } else {
+          btn.style.setProperty("--dl-progress", String(pct));
+          btn.querySelector(".dl-progress-text").textContent = `${pct}%`;
+        }
+      },
+      onComplete: () => {
+        btn.style.setProperty("--dl-progress", "100");
+        btn.innerHTML = `${CHECK_ICON}<span class="dl-progress-text">OK</span>`;
+        btn.style.color = "#4ade80";
+        setTimeout(() => {
+          btn.innerHTML = origHtml;
+          btn.style.color = "";
+          btn.style.removeProperty("--dl-progress");
+          btn.classList.remove("card-action-btn--downloading");
+          btn.disabled = false;
+        }, 1500);
+      },
+      onError: () => {
+        btn.innerHTML = origHtml;
+        btn.style.removeProperty("--dl-progress");
+        btn.classList.remove("card-action-btn--downloading");
+        btn.disabled = false;
+      },
+    });
+  };
 };
 
 // Update lightbox action buttons for the current image
@@ -348,7 +449,13 @@ const updateLbActions = (imgData) => {
   const dlBtn = lbActionsEl.querySelector(".lb-dl-btn");
 
   if (copyBtn) copyBtn.style.display = isVideo ? "none" : "";
-  if (dlBtn) dlBtn.onclick = (e) => { e.stopPropagation(); downloadImage(url, filename); };
+  if (dlBtn) {
+    if (isVideo) {
+      wireVideoDownload(dlBtn, url, filename, bm?.authorHandle);
+    } else {
+      dlBtn.onclick = (e) => { e.stopPropagation(); downloadImage(url, filename); };
+    }
+  }
   if (copyBtn) copyBtn.onclick = (e) => { e.stopPropagation(); copyImageToClipboard(url, copyBtn); };
 
   lbActionsEl.style.display = "";
@@ -551,25 +658,24 @@ export const openLightbox = (el, bookmark) => {
 
   // ── Single video / GIF ──────────────────────────────────────────────────────
   if (isVideo0) {
-    // Poster shown only until the video is ready
+    pauseAllGridVideos();
+
     const poster = document.createElement("img");
     poster.src = twitterImageUrl(img0.url, "medium");
     poster.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;transition:opacity 0.3s ease;";
     lightboxClone.appendChild(poster);
 
-    // Reuse the grid video element — no reload, no rebuffer
     const gridVideo = el.querySelector(".card-video");
     if (gridVideo && img0.videoUrl) {
       const isGif = img0.type === "animated_gif";
 
-      // Save state to restore on close
       lbState.lightboxItem._gridVideo = gridVideo;
       lbState.lightboxItem._gridVideoParent = gridVideo.parentElement;
       lbState.lightboxItem._gridVideoStyle = gridVideo.getAttribute("style") || "";
       lbState.lightboxItem._gridVideoControls = gridVideo.controls;
       lbState.lightboxItem._gridVideoMuted = gridVideo.muted;
+      lbState.lightboxItem._gridVideoSrc = gridVideo.src;
 
-      // Re-style and move into lightbox
       gridVideo.setAttribute(
         "style",
         "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2;background:#111;"
@@ -577,36 +683,35 @@ export const openLightbox = (el, bookmark) => {
       gridVideo.controls = !isGif;
       gridVideo.muted = false;
 
-      // Stop clicks on the video from bubbling up while it's inside the lightbox.
-      // Keep a reference so we can remove it on close — otherwise the listener
-      // persists after the video is restored to its card and swallows the next
-      // click, preventing the lightbox from reopening.
       const stopVideoClick = (e) => e.stopPropagation();
       gridVideo.addEventListener("click", stopVideoClick);
       lbState.lightboxItem._gridVideoClickStop = stopVideoClick;
 
-      // If the video has enough data, hide poster immediately
-      if (gridVideo.readyState >= 2) poster.style.opacity = "0";
-      else gridVideo.addEventListener("playing", () => { poster.style.opacity = "0"; }, { once: true });
+      if (gridVideo.readyState >= 3) {
+        poster.style.opacity = "0";
+      } else {
+        gridVideo.src = priorityVideoUrl(img0.videoUrl);
+        gridVideo.load();
+      }
 
+      _wireVideoTimeout(gridVideo, poster, lightboxClone, img0.videoUrl, isGif);
       lightboxClone.appendChild(gridVideo);
       gridVideo.play().catch(() => {});
     } else if (img0.videoUrl) {
-      // Fallback: no grid video found — create a fresh one
       const isGif = img0.type === "animated_gif";
       const video = document.createElement("video");
-      video.src = `/proxy-video?url=${encodeURIComponent(img0.videoUrl)}`;
+      video.src = priorityVideoUrl(img0.videoUrl);
       video.controls = !isGif;
       video.autoplay = true;
       video.loop = isGif;
       video.muted = false;
       video.playsInline = true;
       video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2;opacity:0;transition:opacity 0.3s ease;";
-      video.addEventListener("playing", () => { video.style.opacity = "1"; poster.style.opacity = "0"; }, { once: true });
       video.addEventListener("click", (e) => e.stopPropagation());
+      _wireVideoTimeout(video, poster, lightboxClone, img0.videoUrl, isGif);
       lightboxClone.appendChild(video);
+      video.play().catch(() => {});
     } else {
-      // No video URL — show "Play on Twitter" button
       const btn = document.createElement("button");
       btn.className = "lightbox-play-btn";
       btn.innerHTML = `<span class="play-pill visible"><img src="assets/play-icon.svg" class="play-pill-icon" alt=""><span>Play on Twitter</span></span>`;
@@ -817,7 +922,6 @@ export const closeLightbox = () => {
   closeContextMenu();
   lbState.lightboxAnimating = true;
 
-  // Text-only modal: no grid-item animation to reverse — fade out and drop
   if (lbState.lightboxItem.isTextOnly) {
     dom.overlay.classList.remove("active");
     Motion.animate(
@@ -856,7 +960,6 @@ export const closeLightbox = () => {
   const fromH = lbState.lightboxItem._endH;
 
   const cleanup = () => {
-    // Restore the moved grid video back to its card before removing the clone
     const gv = lbState.lightboxItem?._gridVideo;
     const gvParent = lbState.lightboxItem?._gridVideoParent;
     if (gv && gvParent) {
@@ -865,6 +968,12 @@ export const closeLightbox = () => {
       gv.setAttribute("style", lbState.lightboxItem._gridVideoStyle);
       gv.controls = lbState.lightboxItem._gridVideoControls;
       gv.muted = lbState.lightboxItem._gridVideoMuted;
+
+      if (lbState.lightboxItem._gridVideoSrc) {
+        gv.src = lbState.lightboxItem._gridVideoSrc;
+        gv.load();
+      }
+
       gvParent.appendChild(gv);
     }
     lightboxClone.remove();
@@ -874,6 +983,7 @@ export const closeLightbox = () => {
     lbState.lightboxOpen = false;
     lbState.lightboxItem = null;
     lbState.lightboxAnimating = false;
+    resumeVisibleGridVideos();
   };
 
   if (!inViewport) {
