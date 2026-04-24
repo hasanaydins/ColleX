@@ -212,6 +212,17 @@ let lightboxClone = null;
 let lbActionsEl = null;
 let lbContextMenuEl = null;
 
+// The side panel (#lightbox-info) is a persistent DOM node reused across
+// openings. Without an explicit reset, its inline styles (size, opacity,
+// pointer-events) survive close and intercept clicks on the grid underneath.
+const resetSidePanel = () => {
+  const sidePanel = document.getElementById("lightbox-info");
+  if (!sidePanel) return;
+  sidePanel.classList.remove("lb-side-panel", "lb-bottom-panel");
+  sidePanel.removeAttribute("style");
+  sidePanel.innerHTML = "";
+};
+
 // Right-click / long-press context menu on lightbox media. Mirrors the floating
 // action buttons (share / copy / download) so the actions are reachable without
 // needing the toolbar to be on screen — matches native image-viewer expectations.
@@ -315,49 +326,85 @@ const lbShowPhoto = (container, imgData, fit = "cover") => {
 const priorityVideoUrl = (videoUrl) =>
   `/proxy-video?url=${encodeURIComponent(videoUrl)}&priority=1`;
 
-const _wireVideoTimeout = (videoEl, poster, container, videoUrl, isGif, retryCount = 0) => {
-  const MAX_RETRIES = 2;
-  let played = false;
-  let retryTimer = null;
+// Plyr wraps the <video> tag with its own chrome (.plyr container, controls,
+// settings menu). We keep native <video> for animated_gif since GIFs are
+// controls-less by design — Plyr's UI would just be in the way.
+const PLYR_OPTS = {
+  iconUrl: "node_modules/plyr/dist/plyr.svg",
+  blankVideo: "",
+  controls: ["play-large", "play", "progress", "current-time", "duration", "mute", "volume", "settings", "fullscreen"],
+  settings: ["speed"],
+  speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+  keyboard: { focused: true, global: false }, // global:false avoids stealing arrow keys from carousel
+  tooltips: { controls: true, seek: true },
+  fullscreen: { enabled: true, fallback: true, iosNative: false },
+  storage: { enabled: true, key: "plyr_lightbox" },
+};
 
-  const onPlaying = () => {
-    played = true;
-    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-    if (poster) poster.style.opacity = "0";
-    if (videoEl.style.opacity === "0") videoEl.style.opacity = "1";
-  };
+// Initialise Plyr on a video element after it has been appended to the DOM.
+// Returns the player instance (or null for GIFs / when Plyr isn't loaded).
+// The .plyr wrapper is sized to fill the lightbox slot and click-bubbling is
+// stopped so clicking the player doesn't dismiss the lightbox.
+const initPlyr = (videoEl, isGif) => {
+  if (isGif || typeof Plyr === "undefined") return null;
+  const player = new Plyr(videoEl, PLYR_OPTS);
+  const wrap = player.elements?.container;
+  if (wrap) {
+    wrap.style.cssText += "position:absolute;inset:0;width:100%;height:100%;z-index:2;background:#111;border-radius:inherit;";
+    wrap.addEventListener("click", (e) => e.stopPropagation());
+  }
+  return player;
+};
 
-  const doRetry = () => {
-    if (played || retryCount >= MAX_RETRIES) return;
-    retryCount++;
+// Plyr.destroy() restores the underlying <video> back into the wrapper's slot.
+// Safe to call with null/undefined.
+const destroyPlyr = (player) => {
+  if (!player) return;
+  try { player.destroy(); } catch (err) { console.warn("Plyr destroy failed:", err); }
+};
+
+const RESTART_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+
+const _wireVideoLoader = (videoEl, container, videoUrl, isGif) => {
+  const restartBtn = document.createElement("button");
+  restartBtn.className = "lb-video-restart";
+  restartBtn.title = "Reload video";
+  restartBtn.innerHTML = RESTART_ICON;
+  container.appendChild(restartBtn);
+
+  const hide = () => { restartBtn.classList.add("hidden"); };
+  const show = () => { restartBtn.classList.remove("hidden"); };
+
+  videoEl.addEventListener("playing", hide, { once: true });
+  videoEl.addEventListener("error", show);
+  videoEl.addEventListener("waiting", show);
+  videoEl.addEventListener("canplay", hide);
+
+  const doRestart = async () => {
+    restartBtn.classList.add("lb-video-restart--loading");
+
+    try {
+      await fetch(`/video-cache-clear?url=${encodeURIComponent(videoUrl)}`, { method: "POST" });
+    } catch {}
+
     videoEl.pause();
     videoEl.removeAttribute("src");
     videoEl.load();
 
-    const freshVideo = document.createElement("video");
-    freshVideo.src = `${priorityVideoUrl(videoUrl)}&_retry=${retryCount}`;
-    freshVideo.controls = !isGif;
-    freshVideo.autoplay = true;
-    freshVideo.loop = isGif;
-    freshVideo.muted = isGif;
-    freshVideo.playsInline = true;
-    freshVideo.preload = "auto";
-    freshVideo.style.cssText = videoEl.style.cssText;
-    freshVideo.addEventListener("click", (e) => e.stopPropagation());
-    container.appendChild(freshVideo);
-    videoEl.remove();
+    const freshSrc = `${priorityVideoUrl(videoUrl)}&_t=${Date.now()}`;
+    videoEl.src = freshSrc;
 
-    _wireVideoTimeout(freshVideo, poster, container, videoUrl, isGif, retryCount);
-    freshVideo.play().catch(() => {});
+    videoEl.removeEventListener("playing", hide);
+    videoEl.addEventListener("playing", hide, { once: true });
+
+    videoEl.play().catch(() => {});
+    restartBtn.classList.remove("lb-video-restart--loading");
   };
 
-  videoEl.addEventListener("playing", onPlaying, { once: true });
-
-  retryTimer = setTimeout(() => {
-    if (!played && videoEl.readyState < 2) {
-      doRetry();
-    }
-  }, 5000);
+  restartBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    doRestart();
+  });
 };
 
 const lbShowVideo = (container, imgData, fit = "contain") => {
@@ -373,14 +420,15 @@ const lbShowVideo = (container, imgData, fit = "contain") => {
   video.controls = !isGif;
   video.autoplay = true;
   video.loop = isGif;
-  video.muted = isGif;
+  video.muted = true;
   video.playsInline = true;
   video.preload = "auto";
   video.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};z-index:2;background:#111;`;
   video.addEventListener("click", (e) => e.stopPropagation());
   container.appendChild(video);
 
-  _wireVideoTimeout(video, poster, container, imgData.videoUrl, isGif);
+  container._plyrPlayer = initPlyr(video, isGif);
+  _wireVideoLoader(video, container, imgData.videoUrl, isGif);
   video.play().catch(() => {});
 };
 
@@ -448,6 +496,9 @@ const updateLbActions = (imgData) => {
   const copyBtn = lbActionsEl.querySelector(".lb-copy-btn");
   const dlBtn = lbActionsEl.querySelector(".lb-dl-btn");
 
+  // Lift the action toolbar above Plyr's control bar when showing a video
+  lbActionsEl.classList.toggle("lb-actions--video", isVideo);
+
   if (copyBtn) copyBtn.style.display = isVideo ? "none" : "";
   if (dlBtn) {
     if (isVideo) {
@@ -499,7 +550,11 @@ export const lbCarouselGoTo = (images, idx) => {
   const track = lightboxClone?.querySelector(".lb-track");
   if (!track) return;
 
-  // Stop any playing video in the outgoing slide so it doesn't keep buffering
+  // Stop any playing video in the outgoing slide so it doesn't keep buffering.
+  // Destroy Plyr first so its event listeners and DOM wrapper are torn down
+  // cleanly before we wipe innerHTML.
+  destroyPlyr(track._plyrPlayer);
+  track._plyrPlayer = null;
   const prevVideo = track.querySelector("video");
   if (prevVideo) {
     try { prevVideo.pause(); } catch {}
@@ -540,9 +595,9 @@ const openTextLightbox = (el, bookmark) => {
   const cardHtml = buildCardPreviewHtml(bookmark.card);
   const quotedHtml = buildQuotedHtml(bookmark.quotedTweet);
 
-  // Hide the reusable side-panel element — text-only mode uses its own modal
-  const sidePanel = document.getElementById("lightbox-info");
-  if (sidePanel) sidePanel.classList.remove("lb-side-panel", "lb-bottom-panel");
+  // Text-only mode uses its own modal; fully reset the reusable side panel so
+  // stale content/styles from a previous media lightbox don't leak through.
+  resetSidePanel();
 
   lightboxClone = document.createElement("div");
   lightboxClone.className = "lb-text-modal";
@@ -681,7 +736,7 @@ export const openLightbox = (el, bookmark) => {
         "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2;background:#111;"
       );
       gridVideo.controls = !isGif;
-      gridVideo.muted = false;
+      gridVideo.muted = true;
 
       const stopVideoClick = (e) => e.stopPropagation();
       gridVideo.addEventListener("click", stopVideoClick);
@@ -694,8 +749,9 @@ export const openLightbox = (el, bookmark) => {
         gridVideo.load();
       }
 
-      _wireVideoTimeout(gridVideo, poster, lightboxClone, img0.videoUrl, isGif);
       lightboxClone.appendChild(gridVideo);
+      lbState.lightboxItem._plyrPlayer = initPlyr(gridVideo, isGif);
+      _wireVideoLoader(gridVideo, lightboxClone, img0.videoUrl, isGif);
       gridVideo.play().catch(() => {});
     } else if (img0.videoUrl) {
       const isGif = img0.type === "animated_gif";
@@ -704,12 +760,14 @@ export const openLightbox = (el, bookmark) => {
       video.controls = !isGif;
       video.autoplay = true;
       video.loop = isGif;
-      video.muted = false;
+      video.muted = true;
       video.playsInline = true;
       video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2;opacity:0;transition:opacity 0.3s ease;";
       video.addEventListener("click", (e) => e.stopPropagation());
-      _wireVideoTimeout(video, poster, lightboxClone, img0.videoUrl, isGif);
+      video.addEventListener("playing", () => { video.style.opacity = "1"; poster.style.opacity = "0"; }, { once: true });
       lightboxClone.appendChild(video);
+      lbState.lightboxItem._plyrPlayer = initPlyr(video, isGif);
+      _wireVideoLoader(video, lightboxClone, img0.videoUrl, isGif);
       video.play().catch(() => {});
     } else {
       const btn = document.createElement("button");
@@ -932,6 +990,7 @@ export const closeLightbox = () => {
       lightboxClone?.remove();
       lightboxClone = null;
       lbActionsEl = null;
+      resetSidePanel();
       lbState.lightboxOpen = false;
       lbState.lightboxItem = null;
       lbState.lightboxAnimating = false;
@@ -960,6 +1019,9 @@ export const closeLightbox = () => {
   const fromH = lbState.lightboxItem._endH;
 
   const cleanup = () => {
+    // Tear down Plyr first so the underlying <video> is unwrapped from the
+    // .plyr container before we try to move/reset it back into the grid card.
+    destroyPlyr(lbState.lightboxItem?._plyrPlayer);
     const gv = lbState.lightboxItem?._gridVideo;
     const gvParent = lbState.lightboxItem?._gridVideoParent;
     if (gv && gvParent) {
@@ -976,9 +1038,13 @@ export const closeLightbox = () => {
 
       gvParent.appendChild(gv);
     }
+    // Carousel slides may have their own Plyr instances on the track element
+    const track = lightboxClone?.querySelector(".lb-track");
+    if (track?._plyrPlayer) destroyPlyr(track._plyrPlayer);
     lightboxClone.remove();
     lightboxClone = null;
     lbActionsEl = null;
+    resetSidePanel();
     el.style.visibility = "";
     lbState.lightboxOpen = false;
     lbState.lightboxItem = null;

@@ -249,25 +249,36 @@ export const renderGrid = () => {
   dom.viewport.scrollTop = 0;
 };
 
+let fadeOutTimer = null;
+let fadeInTimer = null;
+
 export const rebuildGrid = (withAnimation = true) => {
-  if (withAnimation) {
-    if (state.isTransitioning) return;
-    state.isTransitioning = true;
-    dom.grid.style.transition = "opacity 0.2s ease";
-    dom.grid.style.opacity = "0";
-    setTimeout(() => {
-      applyFilters();
-      renderGrid();
-      void dom.grid.offsetHeight;
-      dom.grid.style.transition = "opacity 0.3s ease";
-      dom.grid.style.opacity = "1";
-      setTimeout(() => {
-        dom.grid.style.transition = "";
-        state.isTransitioning = false;
-      }, 300);
-    }, 200);
-  } else {
+  if (fadeOutTimer) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
+  if (fadeInTimer) { clearTimeout(fadeInTimer); fadeInTimer = null; }
+
+  if (!withAnimation) {
     applyFilters();
     renderGrid();
+    dom.grid.style.transition = "";
+    dom.grid.style.opacity = "1";
+    state.isTransitioning = false;
+    return;
   }
+
+  state.isTransitioning = true;
+  dom.grid.style.transition = "opacity 0.2s ease";
+  dom.grid.style.opacity = "0";
+  fadeOutTimer = setTimeout(() => {
+    fadeOutTimer = null;
+    applyFilters();
+    renderGrid();
+    void dom.grid.offsetHeight;
+    dom.grid.style.transition = "opacity 0.3s ease";
+    dom.grid.style.opacity = "1";
+    fadeInTimer = setTimeout(() => {
+      fadeInTimer = null;
+      dom.grid.style.transition = "";
+      state.isTransitioning = false;
+    }, 300);
+  }, 200);
 };

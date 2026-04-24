@@ -1,12 +1,13 @@
 {
   "name": "collex",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "productName": "ColleX",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "start:server": "node server.js",
     "build": "electron-builder --mac",
+    "build:win": "electron-builder --win",
     "pack": "electron-builder --dir"
   },
   "keywords": [],
@@ -16,11 +17,12 @@
   "dependencies": {
     "electron-updater": "^6.8.3",
     "jszip": "^3.10.1",
-    "motion": "^12.38.0"
+    "motion": "^12.38.0",
+    "plyr": "^3.8.4"
   },
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.collex.app",
@@ -33,6 +35,30 @@
         "repo": "ColleX"
       }
     ],
+    "win": {
+      "icon": "assets/AppIcon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
@@ -40,9 +66,7 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": {
-        "teamId": "Y85AD4A7KD"
-      },
+      "notarize": true,
       "target": [
         {
           "target": "dmg",

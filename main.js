@@ -27,12 +27,14 @@ function findFreePort() {
 // --- Window management ---
 
 function openMainWindow(port) {
+  const isWin = process.platform === "win32";
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: isWin ? "default" : "hiddenInset",
+    icon: path.join(__dirname, "assets/AppIcon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -63,6 +65,7 @@ function openLoginWindow(port, autoLogin = false) {
     width: 1000,
     height: 720,
     title: "Connect Your X Account",
+    icon: path.join(__dirname, "assets/AppIcon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -276,7 +279,6 @@ function setupAutoUpdater() {
 
   autoUpdater.on("error", (err) => {
     console.error("[updater] error:", err?.message || err);
-    dialog.showErrorBox("Update Error", `Failed to check for updates: ${err?.message || err}`);
   });
 
   autoUpdater.on("checking-for-update", () => {
@@ -447,6 +449,11 @@ function createAppMenu() {
     ...(!isMac ? [{
       label: "Help",
       submenu: [
+        {
+          label: `About ${app.name}`,
+          click: () => showAboutDialog(),
+        },
+        { type: "separator" },
         {
           label: "Check for Updates...",
           click: () => checkForUpdatesManually(),

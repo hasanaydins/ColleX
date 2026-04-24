@@ -283,6 +283,12 @@ body {
   transform: none !important;
   pointer-events: auto !important;
   z-index: 10;
+  transition: bottom 0.2s ease;
+}
+
+/* Sit above Plyr's control bar when the current media is a video */
+.lb-actions--video {
+  bottom: 44px;
 }
 
 .lb-actions .card-action-btn {
@@ -1533,6 +1539,49 @@ body {
 
 .video-loader.hidden {
   opacity: 0;
+}
+
+/* Plyr theming inside the lightbox: match accent + clip to lightbox border */
+.lb-track .plyr,
+.grid-item.lightbox-active > .plyr {
+  --plyr-color-main: var(--accent);
+  --plyr-video-background: #111;
+  --plyr-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* Restart overlay sits above Plyr controls (z-index 3) */
+.lb-video-restart {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s ease, transform 0.15s ease, opacity 0.25s ease;
+}
+
+.lb-video-restart:hover {
+  background: rgba(59, 130, 246, 0.5);
+  transform: scale(1.1);
+}
+
+.lb-video-restart.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lb-video-restart--loading {
+  animation: video-loader-spin 0.8s linear infinite;
 }
 
 @keyframes video-loader-spin {

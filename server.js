@@ -375,9 +375,73 @@ const _serveFromTmp = async (tmpPath, dl, req, res) => {
   }
 };
 
+// Direct upstream passthrough for non-zero Range requests. The cache pipeline
+// fills sequentially via tmp file writes; on a 30-min video, asking
+// _serveFromTmp to wait for diskBytes to reach byte N (often hundreds of MB
+// in) is minutes of dead air — long enough for the browser to give up. The
+// passthrough lets the seek/preload-end request hit upstream directly while
+// the bytes=0- background download continues filling the cache.
+const passthroughRange = (videoUrl, range, res, redirects = 0) => {
+  let clientClosed = false;
+  res.on("close", () => { clientClosed = true; });
+
+  const upstreamReq = https.get(
+    videoUrl,
+    { headers: { Range: range }, timeout: UPSTREAM_CONNECT_TIMEOUT_MS },
+    (upstream) => {
+      if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
+        upstream.resume();
+        if (redirects >= 3) {
+          if (!clientClosed) { try { res.writeHead(502); res.end(); } catch {} }
+          return;
+        }
+        return passthroughRange(upstream.headers.location, range, res, redirects + 1);
+      }
+      if (upstream.statusCode !== 206 && upstream.statusCode !== 200) {
+        if (!clientClosed) { try { res.writeHead(upstream.statusCode || 502); res.end(); } catch {} }
+        upstream.resume();
+        return;
+      }
+
+      upstream.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => {
+        upstream.destroy(new Error("upstream idle timeout"));
+      });
+
+      if (clientClosed) { upstream.resume(); return; }
+
+      const respHeaders = {
+        "Content-Type": "video/mp4",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=86400",
+      };
+      if (upstream.headers["content-length"]) respHeaders["Content-Length"] = upstream.headers["content-length"];
+      if (upstream.headers["content-range"]) respHeaders["Content-Range"] = upstream.headers["content-range"];
+      try { res.writeHead(upstream.statusCode, respHeaders); } catch {}
+      upstream.pipe(res);
+      upstream.on("error", () => { try { res.end(); } catch {} });
+    }
+  );
+
+  upstreamReq.on("timeout", () => upstreamReq.destroy(new Error("upstream connect timeout")));
+  upstreamReq.on("error", () => {
+    if (!clientClosed) { try { res.writeHead(504); res.end(); } catch {} }
+  });
+};
+
 const streamVideoUpstream = (videoUrl, cacheDir, req, res, isPriority = false) => {
   const cachePath = videoCachePathFor(cacheDir, videoUrl);
   const tmpPath = cachePath + ".tmp";
+
+  // Anything that isn't a from-byte-0 request (suffix ranges like `bytes=-500`,
+  // mid-file ranges like `bytes=N-…`) goes through passthrough. Browsers send
+  // these for seeking and trailing-metadata probes; making them wait for the
+  // sequential disk-cache download to catch up is what stalls long videos.
+  const range = req.headers.range;
+  const startsAtZero = !range || /^bytes=0-/.test(range.trim());
+  if (!startsAtZero) {
+    passthroughRange(videoUrl, range, res);
+    return;
+  }
 
   const existing = activeDownloads.get(cachePath);
   if (existing) {
@@ -387,13 +451,6 @@ const streamVideoUpstream = (videoUrl, cacheDir, req, res, isPriority = false) =
 
   if (fs.existsSync(tmpPath) && !inflightCacheWrites.has(cachePath)) {
     try { fs.unlinkSync(tmpPath); } catch {}
-  }
-
-  const range = req.headers.range;
-  let startByte = 0;
-  if (range) {
-    const m = /bytes=(\d*)-/.exec(range);
-    if (m && m[1]) startByte = parseInt(m[1], 10);
   }
 
   const launch = () => {
@@ -409,12 +466,7 @@ const streamVideoUpstream = (videoUrl, cacheDir, req, res, isPriority = false) =
       return;
     }
 
-    if (startByte === 0) {
-      _startDownload(videoUrl, cacheDir, cachePath, tmpPath, res);
-    } else {
-      const dl = _startDownload(videoUrl, cacheDir, cachePath, tmpPath, null);
-      _serveFromTmp(tmpPath, dl, req, res);
-    }
+    _startDownload(videoUrl, cacheDir, cachePath, tmpPath, res);
   };
 
   if (isPriority) {
@@ -512,6 +564,35 @@ function createServer(port, dataDir) {
         if (!err) serveVideoFromDisk(cachePath, req, res);
         else streamVideoUpstream(videoUrl, VIDEO_CACHE_DIR, req, res, isPriority);
       });
+      return;
+    }
+
+    if (parsed.pathname === "/video-cache-clear" && req.method === "POST") {
+      const videoUrl = parsed.searchParams.get("url");
+      if (!videoUrl || !videoUrl.startsWith("https://video.twimg.com/")) {
+        res.writeHead(400);
+        res.end("Invalid video URL");
+        return;
+      }
+      const cachePath = videoCachePathFor(VIDEO_CACHE_DIR, videoUrl);
+      const tmpPath = cachePath + ".tmp";
+
+      const dl = activeDownloads.get(cachePath);
+      if (dl) {
+        if (dl.writer) { dl.writer.destroy(); dl.writer = null; }
+        inflightCacheWrites.delete(cachePath);
+        dl.failed = true;
+        dl._diskWaiters.forEach(w => w.resolve());
+        dl._diskWaiters = [];
+        activeDownloads.delete(cachePath);
+        if (!dl._slotReleased) { dl._slotReleased = true; _releaseSlot(); }
+      }
+
+      try { fs.unlinkSync(cachePath); } catch {}
+      try { fs.unlinkSync(tmpPath); } catch {}
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 

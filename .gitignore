@@ -10,6 +10,7 @@ credentials.json
 .env
 .env.local
 .env.*.local
+.env.example
 
 # Runtime caches (populated on dev launches; lives under userData in prod)
 video-cache/
