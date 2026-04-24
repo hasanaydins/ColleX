@@ -228,6 +228,20 @@ ipcMain.handle("re-login", async () => {
   await beginAuthFlow();
 });
 
+ipcMain.handle("app-version", () => app.getVersion());
+
+ipcMain.handle("check-for-updates", () => {
+  checkForUpdatesManually();
+});
+
+// Open URL in the user's default browser. Routed through IPC because
+// `shell` is not available in sandboxed preload (Electron 20+ default).
+ipcMain.handle("open-external", (_event, url) => {
+  if (typeof url !== "string") return;
+  if (!/^https?:\/\//i.test(url)) return;
+  return shell.openExternal(url);
+});
+
 // Pop up the native macOS share sheet (AirDrop, Messages, Mail, Notes, etc.)
 // anchored to the mouse position. macOS-only; returns false on other platforms
 // so the renderer can fall back to clipboard copy.

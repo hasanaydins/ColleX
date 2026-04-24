@@ -480,41 +480,57 @@ const updateSyncButtonState = (lastSyncAt) => {
 };
 
 // --- About modal ---
-// Fill in your personal info and social links here.
-const ABOUT_INFO = {
+
+const ABOUT_MAKER = {
   name: "Hasan Aydın",
   role: "Product Designer & Indie Maker",
-  tagline: "Making X bookmarks truly useful again.",
-  socials: [
-    // { label: "X / Twitter", href: "https://x.com/yourhandle" },
-    // { label: "GitHub",      href: "https://github.com/yourhandle" },
-    // { label: "LinkedIn",    href: "https://www.linkedin.com/in/yourhandle" },
-    { label: "Website",     href: "https://hasanaydin.co" },
-  ],
+  tagline: "A visual desktop library that turns your X bookmarks into something you can actually browse, search and rediscover.",
+  website: { label: "hasanaydin.co", href: "https://hasanaydin.co" },
 };
 
 let aboutModalEl = null;
 const openAboutModal = () => {
   if (!aboutModalEl) {
+    const isElectron = !!window.electronAPI?.isElectron;
+
     aboutModalEl = document.createElement("div");
     aboutModalEl.className = "about-modal";
     aboutModalEl.innerHTML = `
       <div class="about-modal-backdrop"></div>
       <div class="about-modal-panel" role="dialog" aria-labelledby="about-modal-title">
         <button class="about-modal-close" aria-label="Close">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
-        <div class="about-modal-logo"><img src="assets/AppLogo.svg" alt="ColleX" draggable="false"></div>
-        <h2 id="about-modal-title" class="about-modal-name">${escapeHtml(ABOUT_INFO.name)}</h2>
-        <div class="about-modal-role">${escapeHtml(ABOUT_INFO.role)}</div>
-        ${ABOUT_INFO.tagline ? `<p class="about-modal-tagline">${escapeHtml(ABOUT_INFO.tagline)}</p>` : ""}
-        ${ABOUT_INFO.socials.length ? `
-          <div class="about-modal-socials">
-            ${ABOUT_INFO.socials.map(s => `
-              <a class="about-modal-social" href="${escapeHtml(s.href)}" target="_blank" rel="noopener">${escapeHtml(s.label)}</a>
-            `).join("")}
+
+        <header class="about-modal-header">
+          <div class="about-modal-logo"><img src="assets/AppLogo.svg" alt="ColleX" draggable="false"></div>
+          <div class="about-modal-version" id="about-modal-version">—</div>
+        </header>
+
+        ${ABOUT_MAKER.tagline ? `<p class="about-modal-tagline">${escapeHtml(ABOUT_MAKER.tagline)}</p>` : ""}
+
+        <div class="about-modal-divider"></div>
+
+        <section class="about-modal-section">
+          <div class="about-modal-eyebrow">Made by</div>
+          <div class="about-modal-name">${escapeHtml(ABOUT_MAKER.name)}</div>
+          <div class="about-modal-role">${escapeHtml(ABOUT_MAKER.role)}</div>
+          <button type="button" class="about-modal-link" id="about-modal-website">
+            <span>${escapeHtml(ABOUT_MAKER.website.label)}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+          </button>
+        </section>
+
+        ${isElectron ? `
+          <div class="about-modal-divider"></div>
+          <div class="about-modal-actions">
+            <button class="about-modal-action" id="about-modal-update">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              <span>Check for Updates</span>
+            </button>
           </div>
         ` : ""}
+
       </div>
     `;
     document.body.appendChild(aboutModalEl);
@@ -525,6 +541,58 @@ const openAboutModal = () => {
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && aboutModalEl.classList.contains("open")) close();
     });
+
+    // Event delegation on the panel — robust against nested SVG clicks and
+    // makes sure handlers run even if individual nodes get re-rendered.
+    const panel = aboutModalEl.querySelector(".about-modal-panel");
+    panel.addEventListener("click", (e) => {
+      const websiteBtn = e.target.closest("#about-modal-website");
+      if (websiteBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = ABOUT_MAKER.website.href;
+        try {
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(href);
+          } else {
+            window.open(href, "_blank", "noopener");
+          }
+        } catch (err) {
+          console.error("[about] failed to open website:", err);
+        }
+        return;
+      }
+
+      const updateBtn = e.target.closest("#about-modal-update");
+      if (updateBtn && isElectron) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (updateBtn.disabled) return;
+        updateBtn.disabled = true;
+        const labelEl = updateBtn.querySelector("span");
+        const original = labelEl.textContent;
+        labelEl.textContent = "Checking…";
+        Promise.resolve(window.electronAPI.checkForUpdates())
+          .finally(() => {
+            labelEl.textContent = original;
+            updateBtn.disabled = false;
+          });
+        return;
+      }
+    });
+
+    if (isElectron) {
+
+      window.electronAPI.getAppVersion?.()
+        .then((v) => {
+          const versionEl = aboutModalEl.querySelector("#about-modal-version");
+          if (versionEl && v) versionEl.textContent = `Version ${v}`;
+        })
+        .catch(() => {});
+    } else {
+      const versionEl = aboutModalEl.querySelector("#about-modal-version");
+      if (versionEl) versionEl.remove();
+    }
   }
   requestAnimationFrame(() => aboutModalEl.classList.add("open"));
 };

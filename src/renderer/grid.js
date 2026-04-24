@@ -7,19 +7,13 @@ import { selectState, toggleCardSelected } from './select.js';
 import { openLightbox } from './lightbox.js';
 import { primaryLinkFor } from './helpers.js';
 
-// Wire the link-preview thumbnail so clicking it opens the external URL rather
-// than the tweet: matches Twitter's card behaviour and stops the card-wide
-// click from also opening the lightbox.
+// Wire the link-preview thumbnail so clicking it opens the lightbox instead
+// of navigating away. The lightbox already shows the link card with a
+// clickable URL, so the user can still reach the external site from there.
 const wireOgClick = (item, bm) => {
   const og = item.querySelector(".og-wrap");
   if (!og) return;
-  const linkUrl = primaryLinkFor(bm);
-  if (!linkUrl) return;
   og.style.cursor = "pointer";
-  og.addEventListener("click", (e) => {
-    e.stopPropagation();
-    window.open(linkUrl, "_blank");
-  });
 };
 
 // Single shared IntersectionObserver for all video autoplay — much cheaper than one per card
