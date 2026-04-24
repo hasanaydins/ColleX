@@ -38,13 +38,18 @@
 
 Grab the latest build from the [GitHub Releases](https://github.com/hasanaydins/ColleX/releases) page.
 
-Pick the build that matches your Mac:
-
+#### For Mac
 | Mac model | File |
 |---|---|
 | **Apple Silicon** (M1, M2, M3, M4) | `ColleX-x.y.z-arm64.dmg` |
 | **Intel** (pre-2020 Macs) | `ColleX-x.y.z.dmg` |
 
+#### For Windows
+| Windows version | File |
+|---|---|
+| **64-bit Windows** (Standard) | `ColleX Setup x.y.z.exe` |
+
+---
 
 ### Option 2 — Run from source
 
