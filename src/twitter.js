@@ -86,6 +86,7 @@ const FOLDER_TIMELINE_QUERY_ID = "LML09uXDwh87F1zd7pbf2w";
 // TweetDetail queryId — rotates too. Failure bubbles to /thread as a 502 and
 // the UI hides the "Show thread" state.
 const TWEET_DETAIL_QUERY_ID = "nBS-WpgA6ZG0CyNHD517JQ";
+const DELETE_BOOKMARK_QUERY_ID = "Wlmlj2-xzyS1GN3a6cj-mQ";
 
 function fetchGraphQL(creds, queryId, operation, variables) {
   return new Promise((resolve, reject) => {
@@ -117,6 +118,153 @@ function fetchGraphQL(creds, queryId, operation, variables) {
     req.on("error", reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("Request timed out")); });
   });
+}
+
+function postGraphQL(creds, queryId, operation, variables) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      variables,
+      queryId,
+    });
+    const headers = {
+      ...makeHeaders(creds),
+      "content-length": Buffer.byteLength(body),
+    };
+
+    const req = https.request(
+      `https://x.com/i/api/graphql/${queryId}/${operation}`,
+      { method: "POST", headers, timeout: 30000 },
+      (res) => {
+        let raw = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => { raw += c; });
+        res.on("end", () => {
+          if (res.statusCode === 429) {
+            reject(Object.assign(new Error("Rate limited"), { status: 429 }));
+            return;
+          }
+          if (res.statusCode === 401 || res.statusCode === 403) {
+            reject(Object.assign(new Error("Authentication expired — please re-login"), { status: res.statusCode }));
+            return;
+          }
+          let json;
+          try { json = raw ? JSON.parse(raw) : {}; }
+          catch { reject(new Error(`JSON parse failed (${res.statusCode}): ${raw.slice(0, 300)}`)); return; }
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(Object.assign(new Error(json?.errors?.[0]?.message || `GraphQL mutation failed (${res.statusCode})`), { status: res.statusCode }));
+            return;
+          }
+          if (Array.isArray(json?.errors) && json.errors.length > 0) {
+            reject(new Error(json.errors[0]?.message || "GraphQL mutation failed"));
+            return;
+          }
+          resolve(json);
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timed out")); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function fetchText(url, headers, maxBytes = 5 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers, timeout: 20000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        const nextUrl = new URL(res.headers.location, url).href;
+        fetchText(nextUrl, headers, maxBytes).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        reject(Object.assign(new Error(`HTTP ${res.statusCode}`), { status: res.statusCode }));
+        return;
+      }
+      let body = "";
+      let bytes = 0;
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        bytes += Buffer.byteLength(chunk);
+        if (bytes <= maxBytes) body += chunk;
+        if (bytes > maxBytes) req.destroy();
+      });
+      res.on("end", () => resolve(body));
+      res.on("close", () => resolve(body));
+    });
+    req.on("error", (err) => {
+      if (err.code === "ECONNRESET") resolve("");
+      else reject(err);
+    });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timed out")); });
+  });
+}
+
+function extractOperationQueryId(source, operation) {
+  const escaped = operation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`queryId["']?\\s*[:=]\\s*["']([^"']+)["'][\\s\\S]{0,500}?operationName["']?\\s*[:=]\\s*["']${escaped}["']`),
+    new RegExp(`operationName["']?\\s*[:=]\\s*["']${escaped}["'][\\s\\S]{0,500}?queryId["']?\\s*[:=]\\s*["']([^"']+)["']`),
+    new RegExp(`["']${escaped}["']\\s*,\\s*queryId\\s*:\\s*["']([^"']+)["']`),
+    new RegExp(`queryId\\s*:\\s*["']([^"']+)["']\\s*,\\s*operationName\\s*:\\s*["']${escaped}["']`),
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+async function discoverOperationQueryId(creds, operation) {
+  const headers = makeHeaders(creds);
+  headers.accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+  const html = await fetchText("https://x.com/i/bookmarks", headers, 2 * 1024 * 1024);
+  const fromHtml = extractOperationQueryId(html, operation);
+  if (fromHtml) return fromHtml;
+
+  const scriptUrls = [...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/g)]
+    .map((m) => new URL(m[1], "https://x.com").href);
+
+  const likelyFirst = [
+    ...scriptUrls.filter((url) => /main|ondemand|loader|app/i.test(url)),
+    ...scriptUrls.filter((url) => !/main|ondemand|loader|app/i.test(url)),
+  ];
+
+  for (const scriptUrl of likelyFirst.slice(0, 80)) {
+    try {
+      const js = await fetchText(scriptUrl, { ...headers, accept: "*/*" }, 8 * 1024 * 1024);
+      const found = extractOperationQueryId(js, operation);
+      if (found) return found;
+    } catch {}
+  }
+
+  return null;
+}
+
+async function getOperationQueryId(creds, dataDir, operation) {
+  const stored =
+    creds.queryIds?.[operation] ||
+    (operation === "DeleteBookmark" ? creds.deleteBookmarkQueryId : null) ||
+    (operation === "DeleteBookmark" ? DELETE_BOOKMARK_QUERY_ID : null);
+  if (stored) return stored;
+
+  const discovered = await discoverOperationQueryId(creds, operation);
+  if (!discovered) return null;
+
+  try {
+    const { saveCredentials } = require("./credentials");
+    saveCredentials(dataDir, {
+      ...creds,
+      queryIds: { ...(creds.queryIds || {}), [operation]: discovered },
+      ...(operation === "DeleteBookmark" ? { deleteBookmarkQueryId: discovered } : {}),
+    });
+  } catch {}
+
+  return discovered;
 }
 
 const fetchPage = (creds, variables) =>
@@ -570,6 +718,25 @@ async function fetchThread(creds, tweetId) {
   return tweets;
 }
 
+async function removeBookmark(dataDir, tweetId) {
+  const creds = loadCredentials(dataDir);
+  if (!creds) {
+    throw Object.assign(new Error("Not authenticated — please re-login through the app"), { status: 401 });
+  }
+  if (!creds.bearerToken) creds.bearerToken = FALLBACK_BEARER;
+
+  const queryId = await getOperationQueryId(creds, dataDir, "DeleteBookmark");
+  if (!queryId) {
+    throw new Error("Could not find X DeleteBookmark mutation. Open X in the app and try re-login, then retry.");
+  }
+
+  const json = await postGraphQL(creds, queryId, "DeleteBookmark", {
+    tweet_id: String(tweetId),
+  });
+
+  return json;
+}
+
 function fetchUserInfo(creds) {
   return new Promise((resolve) => {
     const headers = makeHeaders(creds);
@@ -597,4 +764,4 @@ function fetchUserInfo(creds) {
   });
 }
 
-module.exports = { syncBookmarks, fetchUserInfo, fetchThread };
+module.exports = { syncBookmarks, fetchUserInfo, fetchThread, removeBookmark };

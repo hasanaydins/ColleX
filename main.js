@@ -82,14 +82,26 @@ function openLoginWindow(port, autoLogin = false) {
       // Always pass through — never block the request
       callback({ requestHeaders: details.requestHeaders });
 
+      const opMatch = details.url.match(/graphql\/([^/?]+)\/([^/?]+)/);
+      if (!opMatch) return;
+      const queryId = opMatch[1];
+      const operation = opMatch[2];
+
+      if (operation === "DeleteBookmark") {
+        const existing = loadCredentials(DATA_DIR) || {};
+        saveCredentials(DATA_DIR, {
+          ...existing,
+          deleteBookmarkQueryId: queryId,
+          queryIds: { ...(existing.queryIds || {}), DeleteBookmark: queryId },
+        });
+        return;
+      }
+
       if (credentialsCaptured) return;
 
-      // Only care about Bookmarks operation
-      if (!details.url.includes("/Bookmarks")) return;
-
-      const queryIdMatch = details.url.match(/graphql\/([^/?]+)\/Bookmarks/);
-      if (!queryIdMatch) return;
-      const queryId = queryIdMatch[1];
+      // Only the Bookmarks operation carries everything needed to bootstrap
+      // the app session.
+      if (operation !== "Bookmarks") return;
 
       const h = details.requestHeaders;
       const bearerRaw = h["authorization"] || h["Authorization"] || "";

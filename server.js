@@ -22,6 +22,45 @@ const videoCachePathFor = (cacheDir, videoUrl) => {
   return path.join(cacheDir, hash + ".mp4");
 };
 
+const readJsonBody = (req, maxBytes = 64 * 1024) =>
+  new Promise((resolve, reject) => {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (Buffer.byteLength(raw) > maxBytes) {
+        reject(Object.assign(new Error("Request body too large"), { status: 413 }));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch { reject(Object.assign(new Error("Invalid JSON body"), { status: 400 })); }
+    });
+    req.on("error", reject);
+  });
+
+const removeBookmarkFromDisk = (dataDir, tweetId) => {
+  const dataPath = path.join(dataDir, "bookmarks-data.json");
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+  } catch {
+    return { removed: false, count: 0 };
+  }
+
+  const bookmarks = Array.isArray(data) ? data : data.bookmarks;
+  if (!Array.isArray(bookmarks)) return { removed: false, count: 0 };
+
+  const next = bookmarks.filter((bm) => String(bm.id) !== String(tweetId));
+  const removed = next.length !== bookmarks.length;
+  if (!removed) return { removed: false, count: bookmarks.length };
+
+  const output = Array.isArray(data) ? next : { ...data, bookmarks: next };
+  fs.writeFileSync(dataPath, JSON.stringify(output, null, 2), "utf8");
+  return { removed: true, count: next.length };
+};
+
 // LRU eviction — debounced, runs after a successful cache write
 let cleanupTimer = null;
 const scheduleVideoCacheCleanup = (cacheDir) => {
@@ -712,6 +751,48 @@ function createServer(port, dataDir) {
           "Content-Type": "application/json",
         });
         res.end(JSON.stringify({ error: err.message || "thread fetch failed" }));
+      }
+      return;
+    }
+
+    if (parsed.pathname === "/bookmark/remove") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "method not allowed" }));
+        return;
+      }
+
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        res.writeHead(err.status || 400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "invalid request" }));
+        return;
+      }
+
+      const tweetId = body?.id || body?.tweetId;
+      if (!tweetId || !/^\d+$/.test(String(tweetId))) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid id" }));
+        return;
+      }
+
+      try {
+        const { removeBookmark } = require("./src/twitter");
+        await removeBookmark(DATA_DIR, tweetId);
+        const local = removeBookmarkFromDisk(DATA_DIR, tweetId);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify({ ok: true, removed: local.removed, count: local.count }));
+      } catch (err) {
+        res.writeHead(err.status === 401 || err.status === 403 ? 401 : 502, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify({ error: err.message || "bookmark remove failed" }));
       }
       return;
     }

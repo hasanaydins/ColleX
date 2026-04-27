@@ -1,7 +1,7 @@
 // --- Grid rendering: masonry, card, and list views ---
 
 import { state, CONFIG, dom } from './state.js';
-import { buildCardHtml, buildListItemHtml, addCardActions, buildShareButton } from './card.js';
+import { buildCardHtml, buildListItemHtml, addCardActions, buildShareButton, buildRemoveBookmarkButton } from './card.js';
 import { loadOgCard, mediaHeight } from './media.js';
 import { selectState, toggleCardSelected } from './select.js';
 import { openLightbox } from './lightbox.js';
@@ -181,6 +181,12 @@ const renderList = (sharedVideoObserver) => {
       if (selectState.selectedIds.has(bm.id)) item.classList.add("selected");
     }
 
+    const actions = document.createElement("div");
+    actions.className = "card-actions card-actions--list";
+    actions.appendChild(buildShareButton(bm));
+    actions.appendChild(buildRemoveBookmarkButton(bm));
+    item.appendChild(actions);
+
     dom.grid.appendChild(item);
   }
 };
@@ -197,6 +203,7 @@ const setupCardInteractions = (item, bm, hasMedia, sharedVideoObserver) => {
     const actions = document.createElement("div");
     actions.className = "card-actions card-actions--text-only";
     actions.appendChild(buildShareButton(bm));
+    actions.appendChild(buildRemoveBookmarkButton(bm));
     item.appendChild(actions);
   } else {
     const fields = state.viewFields[state.activeView];

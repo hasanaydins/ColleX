@@ -1,6 +1,6 @@
 // --- Card building: HTML generation & action buttons ---
 
-import { escapeHtml, hostnameOf, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
+import { escapeHtml, hostnameOf, DL_ICON, COPY_ICON, SHARE_ICON, UNBOOKMARK_ICON } from './helpers.js';
 import { buildMediaHtml, downloadImage, copyImageToClipboard, bookmarkFilename, mediaDownloadUrl, triggerAnchorDownload, bookmarksToZip } from './media.js';
 import { startDownload } from './downloads.js';
 import { state } from './state.js';
@@ -203,12 +203,76 @@ export const buildShareButton = (bm) => {
   return shareBtn;
 };
 
+const removeBookmarkLocally = (id) => {
+  const sameId = (bm) => String(bm.id) === String(id);
+  state.allBookmarks = state.allBookmarks.filter((bm) => !sameId(bm));
+  state.filteredBookmarks = state.filteredBookmarks.filter((bm) => !sameId(bm));
+
+  const badge = document.getElementById("results-count");
+  if (badge) badge.textContent = state.filteredBookmarks.length;
+};
+
+export const buildRemoveBookmarkButton = (bm, { onRemoved } = {}) => {
+  const btn = document.createElement("button");
+  btn.className = "card-action-btn card-action-btn--remove";
+  btn.title = "Remove from bookmarks";
+  btn.setAttribute("aria-label", "Remove from bookmarks");
+  btn.innerHTML = UNBOOKMARK_ICON;
+
+  const originalHtml = btn.innerHTML;
+
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (btn.disabled) return;
+
+    const author = bm.authorHandle ? `@${bm.authorHandle}` : "this post";
+    const ok = window.confirm(`Remove ${author} from your X bookmarks?`);
+    if (!ok) return;
+
+    btn.disabled = true;
+    btn.classList.add("card-action-btn--busy");
+    btn.innerHTML = `<span class="action-spinner" aria-hidden="true"></span>`;
+
+    try {
+      const res = await fetch("/bookmark/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: bm.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      removeBookmarkLocally(bm.id);
+      const item = btn.closest(".grid-item, .card-view-item, .list-item");
+      if (typeof onRemoved === "function") {
+        onRemoved({ button: btn, item });
+        return;
+      }
+      if (item) {
+        item.style.transition = "opacity 0.18s ease, transform 0.18s ease";
+        item.style.opacity = "0";
+        item.style.transform = "scale(0.98)";
+        setTimeout(() => item.remove(), 180);
+      }
+    } catch (err) {
+      console.error("Remove bookmark failed:", err);
+      btn.classList.remove("card-action-btn--busy");
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+      window.alert(`Could not remove bookmark: ${err.message}`);
+    }
+  });
+
+  return btn;
+};
+
 export const addCardActions = (mediaWrap, images, bm) => {
   const wrap = document.createElement("div");
   wrap.className = "card-actions";
 
   // Share button is always first
   wrap.appendChild(buildShareButton(bm));
+  wrap.appendChild(buildRemoveBookmarkButton(bm));
 
   if (images.length > 1) {
     // Multi-image: zip all media into single download

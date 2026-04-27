@@ -190,6 +190,13 @@ body {
   pointer-events: auto;
 }
 
+.list-item:hover .card-actions,
+.list-item:focus-within .card-actions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 .grid-item--downloading .card-actions {
   opacity: 1;
   transform: translateY(0);
@@ -220,6 +227,27 @@ body {
 .card-action-btn:hover {
   background: rgba(0, 0, 0, 0.82);
   transform: scale(1.1);
+}
+
+.card-action-btn--remove:hover {
+  color: #f87171;
+}
+
+.card-action-btn--busy {
+  cursor: wait;
+}
+
+.action-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  animation: action-spin 0.8s linear infinite;
+}
+
+@keyframes action-spin {
+  to { transform: rotate(360deg); }
 }
 
 .card-action-btn--multi {
@@ -289,6 +317,11 @@ body {
 /* Sit above Plyr's control bar when the current media is a video */
 .lb-actions--video {
   bottom: 44px;
+}
+
+.lb-actions--text {
+  bottom: 14px;
+  right: 14px;
 }
 
 .lb-actions .card-action-btn {
@@ -2638,7 +2671,7 @@ body {
   height: 100%;
 }
 .lb-text-modal .lb-details-scroll-content {
-  padding: 24px;
+  padding: 24px 24px 74px;
   overflow-y: auto;
   max-height: 82vh;
   box-sizing: border-box;

@@ -4,7 +4,7 @@ import { dom } from './state.js';
 import { twitterImageUrl, escapeHtml, hostnameOf, primaryLinkFor, DL_ICON, COPY_ICON, SHARE_ICON } from './helpers.js';
 import { downloadImage, copyImageToClipboard, mediaDownloadUrl, bookmarkFilename } from './media.js';
 import { startDownload } from './downloads.js';
-import { buildShareButton } from './card.js';
+import { buildShareButton, buildRemoveBookmarkButton } from './card.js';
 import { pauseAllGridVideos, resumeVisibleGridVideos } from './video-queue.js';
 
 export const lbState = {
@@ -512,12 +512,31 @@ const updateLbActions = (imgData) => {
   lbActionsEl.style.display = "";
 };
 
+const closeAfterBookmarkRemoval = () => {
+  const sourceEl = lbState.lightboxItem?.element;
+  closeLightbox();
+  if (sourceEl) {
+    sourceEl.style.transition = "opacity 0.18s ease, transform 0.18s ease";
+    setTimeout(() => {
+      sourceEl.style.visibility = "";
+      sourceEl.style.opacity = "0";
+      sourceEl.style.transform = "scale(0.98)";
+      setTimeout(() => sourceEl.remove(), 180);
+    }, 260);
+  }
+};
+
 const createLbActions = (bookmark) => {
   const wrap = document.createElement("div");
   wrap.className = "card-actions lb-actions";
 
   const shareBtn = buildShareButton(bookmark);
   shareBtn.classList.add("lb-share-btn");
+
+  const removeBtn = buildRemoveBookmarkButton(bookmark, {
+    onRemoved: closeAfterBookmarkRemoval,
+  });
+  removeBtn.classList.add("lb-remove-btn");
 
   const copyBtn = document.createElement("button");
   copyBtn.className = "card-action-btn lb-copy-btn";
@@ -535,9 +554,10 @@ const createLbActions = (bookmark) => {
   infoBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
   infoBtn.style.display = "none";
 
-  // Order: info (conditional) → share → copy → download
+  // Order: info (conditional) → share → unbookmark → copy → download
   wrap.appendChild(infoBtn);
   wrap.appendChild(shareBtn);
+  wrap.appendChild(removeBtn);
   wrap.appendChild(copyBtn);
   wrap.appendChild(dlBtn);
   return wrap;
@@ -638,6 +658,12 @@ const openTextLightbox = (el, bookmark) => {
   `;
 
   document.body.appendChild(lightboxClone);
+  lbActionsEl = createLbActions(bookmark);
+  lbActionsEl.classList.add("lb-actions--text");
+  lbActionsEl.querySelector(".lb-info-btn")?.remove();
+  lbActionsEl.querySelector(".lb-copy-btn")?.remove();
+  lbActionsEl.querySelector(".lb-dl-btn")?.remove();
+  lightboxClone.appendChild(lbActionsEl);
   dom.overlay.classList.add("active");
 
   wireThreadButton(lightboxClone, bookmark);
