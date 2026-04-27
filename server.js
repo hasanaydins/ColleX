@@ -801,6 +801,7 @@ function createServer(port, dataDir) {
     if (parsed.pathname === "/sync") {
       const { loadCredentials, saveCredentials } = require("./src/credentials");
       const creds = loadCredentials(DATA_DIR);
+      const mode = parsed.searchParams.get("mode") === "full" ? "full" : "incremental";
 
       const sseHeaders = {
         "Content-Type": "text/event-stream",
@@ -826,7 +827,7 @@ function createServer(port, dataDir) {
       const onProgress = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 
       const { syncBookmarks } = require("./src/twitter");
-      syncBookmarks(DATA_DIR, onProgress)
+      syncBookmarks(DATA_DIR, onProgress, { mode })
         .then(() => {
           // Save lastSyncAt after successful sync
           const updated = loadCredentials(DATA_DIR);

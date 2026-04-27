@@ -1,10 +1,11 @@
 // --- Sync (Electron only) ---
 
-export const startSync = (btn) => {
+export const startSync = (btn, mode = "incremental") => {
   btn.disabled = true;
   btn.querySelector("span").textContent = "Syncing…";
 
-  const es = new EventSource("/sync");
+  const syncMode = mode === "full" ? "full" : "incremental";
+  const es = new EventSource(`/sync?mode=${syncMode}`);
 
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
@@ -16,7 +17,8 @@ export const startSync = (btn) => {
     } else if (d.type === "progress") {
       btn.querySelector("span").textContent = `${d.count} fetched…`;
     } else if (d.type === "done") {
-      btn.querySelector("span").textContent = `✓ ${d.total} bookmarks`;
+      btn.querySelector("span").textContent =
+        d.mode === "incremental" ? `✓ +${d.added || 0} new` : `✓ ${d.total} bookmarks`;
       es.close();
       setTimeout(() => location.reload(), 1200);
     } else if (d.type === "error") {

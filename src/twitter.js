@@ -504,10 +504,25 @@ function transformBookmark(raw) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = (min, max) => min + Math.floor(Math.random() * (max - min));
 
-async function fetchAllPages(creds, onProgress) {
+function readBookmarksData(dataDir) {
+  const outPath = path.join(dataDir, "bookmarks-data.json");
+  try {
+    const data = JSON.parse(fs.readFileSync(outPath, "utf8"));
+    if (Array.isArray(data)) return { bookmarks: data, folders: [] };
+    return {
+      bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
+      folders: Array.isArray(data.folders) ? data.folders : [],
+    };
+  } catch {
+    return { bookmarks: [], folders: [] };
+  }
+}
+
+async function fetchAllPages(creds, onProgress, { stopAtIds = null } = {}) {
   let cursor = null;
   let page = 0;
   const all = [];
+  let reachedKnownBookmark = false;
 
   while (true) {
     page++;
@@ -545,14 +560,20 @@ async function fetchAllPages(creds, onProgress) {
       json?.data?.bookmark_timeline_v2?.timeline?.instructions ?? [];
     const { tweets, cursor: nextCursor } = parseTimelineInstructions(instructions);
 
-    all.push(...tweets);
+    for (const tweet of tweets) {
+      if (stopAtIds?.has(tweet.tweetId)) {
+        reachedKnownBookmark = true;
+        break;
+      }
+      all.push(tweet);
+    }
 
-    if (!nextCursor || tweets.length === 0) break;
+    if (reachedKnownBookmark || !nextCursor || tweets.length === 0) break;
     cursor = nextCursor;
     await sleep(jitter(800, 2000));
   }
 
-  return all;
+  return { tweets: all, reachedKnownBookmark, pages: page };
 }
 
 async function fetchFolderList(creds) {
@@ -638,7 +659,7 @@ async function enrichWithFolders(creds, bookmarks, onProgress) {
   }
 }
 
-async function syncBookmarks(dataDir, onProgress) {
+async function syncBookmarks(dataDir, onProgress, { mode = "incremental" } = {}) {
   const creds = loadCredentials(dataDir);
   if (!creds) {
     throw new Error("Not authenticated — please re-login through the app");
@@ -647,25 +668,54 @@ async function syncBookmarks(dataDir, onProgress) {
   // Use fallback bearer if captured one is missing
   if (!creds.bearerToken) creds.bearerToken = FALLBACK_BEARER;
 
-  const rawTweets = await fetchAllPages(creds, onProgress);
-  const bookmarks = rawTweets.map(transformBookmark);
+  const existingData = readBookmarksData(dataDir);
+  const existingBookmarks = existingData.bookmarks;
+  const existingIds = new Set(existingBookmarks.map((b) => String(b.id)));
+  const shouldFullSync = mode === "full" || existingBookmarks.length === 0;
 
-  // Sort by most recent first
+  const { tweets: rawTweets, reachedKnownBookmark, pages } = await fetchAllPages(
+    creds,
+    onProgress,
+    shouldFullSync ? {} : { stopAtIds: existingIds }
+  );
+  const fetchedBookmarks = rawTweets.map(transformBookmark);
+
+  let bookmarks;
+  let folders = existingData.folders;
+
+  if (shouldFullSync) {
+    bookmarks = fetchedBookmarks;
+
+    // Pause before switching to folder enumeration so the two phases don't look
+    // like one continuous burst.
+    await sleep(jitter(3000, 6000));
+
+    // Tag bookmarks with folder names (best-effort — folders stay empty on failure)
+    folders = await enrichWithFolders(creds, bookmarks, onProgress);
+  } else {
+    const existingById = new Map(existingBookmarks.map((b) => [String(b.id), b]));
+    for (const bm of fetchedBookmarks) existingById.set(String(bm.id), bm);
+    bookmarks = Array.from(existingById.values());
+  }
+
+  // Keep the existing UI's default sort semantics. Incremental boundary
+  // detection does not depend on this order; it uses the X timeline order
+  // before we merge and sort.
   bookmarks.sort((a, b) => new Date(b.postedAt) - new Date(a.postedAt));
-
-  // Pause before switching to folder enumeration so the two phases don't look
-  // like one continuous burst.
-  await sleep(jitter(3000, 6000));
-
-  // Tag bookmarks with folder names (best-effort — folders stay empty on failure)
-  const folders = await enrichWithFolders(creds, bookmarks, onProgress);
 
   const output = { bookmarks, folders };
   const outPath = path.join(dataDir, "bookmarks-data.json");
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(output, null, 2), "utf8");
 
-  onProgress({ type: "done", total: bookmarks.length });
+  onProgress({
+    type: "done",
+    mode: shouldFullSync ? "full" : "incremental",
+    total: bookmarks.length,
+    added: fetchedBookmarks.length,
+    pages,
+    reachedKnownBookmark,
+  });
 }
 
 // Fetches the full threaded conversation around `tweetId` via TweetDetail GraphQL.

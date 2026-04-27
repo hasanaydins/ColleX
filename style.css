@@ -1781,6 +1781,55 @@ body {
   color: var(--fg);
 }
 
+.sync-menu-wrapper {
+  position: relative;
+}
+
+.sync-dropdown {
+  top: auto;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  transform-origin: bottom right;
+}
+
+.sync-dropdown.open {
+  transform: translateY(0) scale(1);
+}
+
+.sync-dropdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: 14px;
+  color: rgba(var(--fg-rgb), 0.72);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sync-dropdown-item:hover {
+  background: rgba(var(--fg-rgb), 0.09);
+  color: var(--fg);
+}
+
+.sync-dropdown-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sync-dropdown-desc {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: rgba(var(--fg-rgb), 0.48);
+}
+
 /* --- Card checkbox (select mode) --- */
 
 .card-checkbox {

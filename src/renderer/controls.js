@@ -138,12 +138,45 @@ export const createBottomControls = () => {
 
   // Sync button — only shown when running inside Electron
   if (window.electronAPI?.isElectron) {
+    const syncWrapper = document.createElement("div");
+    syncWrapper.className = "sync-menu-wrapper";
+
     const syncBtn = document.createElement("button");
     syncBtn.id = "sync-btn";
     syncBtn.className = "select-toggle sync-btn";
     syncBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>Sync</span>`;
-    syncBtn.addEventListener("click", () => startSync(syncBtn));
-    wrap.appendChild(syncBtn);
+
+    const syncDropdown = document.createElement("div");
+    syncDropdown.className = "folder-dropdown sync-dropdown";
+    syncDropdown.innerHTML = `
+      <button class="sync-dropdown-item" data-sync-mode="incremental" type="button">
+        <span class="sync-dropdown-title">Fast</span>
+        <span class="sync-dropdown-desc">Sync new bookmarks</span>
+      </button>
+      <button class="sync-dropdown-item" data-sync-mode="full" type="button">
+        <span class="sync-dropdown-title">Full</span>
+        <span class="sync-dropdown-desc">Scan and sync all bookmarks (Slower)</span>
+      </button>
+    `;
+    syncDropdown.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const item = e.target.closest("[data-sync-mode]");
+      if (!item || syncBtn.disabled) return;
+      syncDropdown.classList.remove("open");
+      startSync(syncBtn, item.dataset.syncMode);
+    });
+
+    syncBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (syncBtn.disabled) return;
+      closeOtherDropdowns(syncDropdown);
+      syncDropdown.classList.toggle("open");
+    });
+    document.addEventListener("click", () => syncDropdown.classList.remove("open"));
+
+    syncWrapper.appendChild(syncBtn);
+    syncWrapper.appendChild(syncDropdown);
+    wrap.appendChild(syncWrapper);
   }
 
   document.body.appendChild(wrap);
