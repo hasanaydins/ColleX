@@ -79,11 +79,13 @@ body {
   overflow-x: hidden;
   padding-top: 80px;
   box-sizing: border-box;
+  scrollbar-width: none;
 }
 
 /* Hide scrollbar but keep scroll */
 #viewport::-webkit-scrollbar {
-  width: 6px;
+  width: 0;
+  height: 0;
 }
 
 #viewport::-webkit-scrollbar-track {
@@ -99,6 +101,244 @@ body {
   background: rgba(var(--fg-rgb), 0.22);
 }
 
+/* --- Month/year scroll rail --- */
+
+.date-scrollbar {
+  position: fixed;
+  top: 96px;
+  right: 8px;
+  bottom: 96px;
+  z-index: 55;
+  width: 56px;
+  min-width: 44px;
+  cursor: ns-resize;
+  touch-action: none;
+  opacity: 0.58;
+  transition: opacity 0.18s ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.date-scrollbar[hidden] {
+  display: none;
+}
+
+.date-scrollbar:hover,
+.date-scrollbar.is-hovered,
+.date-scrollbar.is-active,
+.date-scrollbar.is-dragging,
+.date-scrollbar:focus-visible {
+  opacity: 1;
+}
+
+.date-scrollbar:focus-visible {
+  outline: none;
+}
+
+.date-scrollbar-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(var(--fg-rgb), 0.12);
+  transition: width 0.18s ease, background 0.18s ease;
+}
+
+.date-scrollbar-dots {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  pointer-events: none;
+}
+
+.date-scrollbar:hover .date-scrollbar-dots,
+.date-scrollbar.is-hovered .date-scrollbar-dots,
+.date-scrollbar.is-active .date-scrollbar-dots,
+.date-scrollbar.is-dragging .date-scrollbar-dots,
+.date-scrollbar:focus-visible .date-scrollbar-dots {
+  opacity: 1;
+}
+
+.date-scrollbar-dot {
+  position: absolute;
+  top: calc(var(--date-dot-progress, 0) * 100%);
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(var(--fg-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--fg-rgb), 0.05);
+  transform: translate(-50%, -50%) scale(0.9);
+  transition: transform 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.date-scrollbar-dot.active {
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(29, 155, 240, 0.16);
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.date-scrollbar-dot.hovered {
+  background: rgba(var(--fg-rgb), 0.72);
+  box-shadow: 0 0 0 4px rgba(var(--fg-rgb), 0.09);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.date-scrollbar:hover .date-scrollbar-track,
+.date-scrollbar.is-active .date-scrollbar-track,
+.date-scrollbar.is-dragging .date-scrollbar-track,
+.date-scrollbar:focus-visible .date-scrollbar-track {
+  width: 6px;
+  background: rgba(var(--fg-rgb), 0.22);
+}
+
+.date-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 7px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 14px;
+  background: var(--pill-bg);
+  border: 1px solid rgba(var(--fg-rgb), 0.16);
+  color: var(--fg);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.26);
+  transform: translate3d(-50%, var(--date-thumb-y, 0), 0);
+  transition: transform 0.22s cubic-bezier(0.25, 1, 0.5, 1), background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+.date-scrollbar:hover .date-scrollbar-thumb,
+.date-scrollbar.is-active .date-scrollbar-thumb,
+.date-scrollbar.is-dragging .date-scrollbar-thumb,
+.date-scrollbar:focus-visible .date-scrollbar-thumb {
+  background: var(--pill-bg-hover);
+  border-color: rgba(var(--fg-rgb), 0.28);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+}
+
+.date-scrollbar.is-dragging .date-scrollbar-thumb {
+  transition-duration: 0.08s;
+}
+
+.date-scrollbar-month,
+.date-scrollbar-year {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.date-scrollbar-month {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(var(--fg-rgb), 0.58);
+}
+
+.date-scrollbar-year {
+  font-size: 15px;
+  font-weight: 800;
+  color: rgba(var(--fg-rgb), 0.92);
+  font-variant-numeric: tabular-nums;
+}
+
+.date-scrollbar-popover {
+  position: fixed;
+  top: var(--date-popover-y, 50vh);
+  right: 72px;
+  min-width: 148px;
+  padding: 13px 15px 14px;
+  box-sizing: border-box;
+  border-radius: 18px;
+  background: var(--dropdown-bg);
+  border: 1px solid rgba(var(--fg-rgb), 0.13);
+  color: var(--fg);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  opacity: 0;
+  transform: translateY(-50%) translateX(8px) scale(0.96);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+.date-scrollbar-popover.visible {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0) scale(1);
+}
+
+.date-scrollbar-popover-month,
+.date-scrollbar-popover strong {
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.date-scrollbar-popover-month {
+  margin-bottom: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(var(--fg-rgb), 0.68);
+}
+
+.date-scrollbar-popover strong {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.date-scrollbar-hover-preview {
+  position: fixed;
+  top: var(--date-hover-y, 50vh);
+  right: 68px;
+  padding: 7px 10px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: rgba(var(--fg-rgb), 0.08);
+  border: 1px solid rgba(var(--fg-rgb), 0.11);
+  color: rgba(var(--fg-rgb), 0.62);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: translateY(-50%) translateX(5px) scale(0.97);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.date-scrollbar-hover-preview.visible {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0) scale(1);
+}
+
+.date-scrollbar-hover-preview.is-current {
+  color: rgba(var(--fg-rgb), 0.48);
+  border-color: rgba(var(--fg-rgb), 0.08);
+}
+
 #container {
   width: 100%;
 }
@@ -108,6 +348,33 @@ body {
   gap: 16px;
   padding: 0 18px 18px;
   align-items: flex-start;
+}
+
+#grid.grid-masonry-date {
+  flex-direction: column;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.date-section {
+  position: relative;
+  width: 100%;
+}
+
+.date-scroll-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.date-section-grid {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  width: 100%;
 }
 
 .masonry-col {
@@ -2253,6 +2520,42 @@ body {
   opacity: 0.7;
 }
 
+@media (max-width: 700px) {
+  .date-scrollbar {
+    top: 88px;
+    right: 0;
+    bottom: 104px;
+    width: 64px;
+  }
+
+  .date-scrollbar-thumb {
+    width: 52px;
+    min-height: 46px;
+    border-radius: 15px;
+  }
+
+  .date-scrollbar-popover {
+    right: 64px;
+    min-width: 132px;
+    padding: 12px 14px;
+    border-radius: 16px;
+  }
+
+  .date-scrollbar-popover-month {
+    font-size: 13px;
+  }
+
+  .date-scrollbar-popover strong {
+    font-size: 31px;
+  }
+
+  .date-scrollbar-hover-preview {
+    right: 58px;
+    font-size: 11px;
+    padding: 6px 9px;
+  }
+}
+
 /* =================================================================
    Light-mode overrides: solid white chrome, no backdrop-filter blur.
    ================================================================= */
@@ -2269,6 +2572,8 @@ body {
 [data-theme="light"] .media-filter,
 [data-theme="light"] .search-bar,
 [data-theme="light"] .scroll-top-btn,
+[data-theme="light"] .date-scrollbar-popover,
+[data-theme="light"] .date-scrollbar-hover-preview,
 [data-theme="light"] .list-thumb-badge,
 [data-theme="light"] .list-thumb-count,
 [data-theme="light"] .results-count,
@@ -2290,6 +2595,9 @@ body {
 [data-theme="light"] .search-bar,
 [data-theme="light"] .media-filter,
 [data-theme="light"] .scroll-top-btn,
+[data-theme="light"] .date-scrollbar-thumb,
+[data-theme="light"] .date-scrollbar-popover,
+[data-theme="light"] .date-scrollbar-hover-preview,
 [data-theme="light"] .lightbox-close {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
@@ -2298,9 +2606,36 @@ body {
 
 [data-theme="light"] .folder-pill:hover,
 [data-theme="light"] .scroll-top-btn:hover,
+[data-theme="light"] .date-scrollbar:hover .date-scrollbar-thumb,
+[data-theme="light"] .date-scrollbar.is-active .date-scrollbar-thumb,
+[data-theme="light"] .date-scrollbar.is-dragging .date-scrollbar-thumb,
 [data-theme="light"] .lightbox-close:hover {
   background: #f0f0f2;
   border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .date-scrollbar-track {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .date-scrollbar:hover .date-scrollbar-track,
+[data-theme="light"] .date-scrollbar.is-active .date-scrollbar-track,
+[data-theme="light"] .date-scrollbar.is-dragging .date-scrollbar-track,
+[data-theme="light"] .date-scrollbar:focus-visible .date-scrollbar-track {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+[data-theme="light"] .date-scrollbar-dot.hovered {
+  background: rgba(0, 0, 0, 0.56);
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .date-scrollbar-hover-preview {
+  color: rgba(0, 0, 0, 0.58);
+}
+
+[data-theme="light"] .date-scrollbar-hover-preview.is-current {
+  color: rgba(0, 0, 0, 0.42);
 }
 
 [data-theme="light"] .about-modal-close {
