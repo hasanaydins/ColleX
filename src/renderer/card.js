@@ -226,7 +226,7 @@ export const buildRemoveBookmarkButton = (bm, { onRemoved } = {}) => {
     if (btn.disabled) return;
 
     const author = bm.authorHandle ? `@${bm.authorHandle}` : "this post";
-    const ok = window.confirm(`Remove ${author} from your X bookmarks?`);
+    const ok = window.confirm(`Remove this post by ${author} from your bookmarks?`);
     if (!ok) return;
 
     btn.disabled = true;
