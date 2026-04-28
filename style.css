@@ -183,9 +183,9 @@ body {
 }
 
 .date-scrollbar-dot.hovered {
-  background: rgba(var(--fg-rgb), 0.72);
-  box-shadow: 0 0 0 4px rgba(var(--fg-rgb), 0.09);
-  transform: translate(-50%, -50%) scale(1.12);
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(29, 155, 240, 0.16);
+  transform: translate(-50%, -50%) scale(1.2);
 }
 
 .date-scrollbar:hover .date-scrollbar-track,
@@ -310,9 +310,9 @@ body {
   padding: 7px 10px;
   box-sizing: border-box;
   border-radius: 999px;
-  background: rgba(var(--fg-rgb), 0.08);
-  border: 1px solid rgba(var(--fg-rgb), 0.11);
-  color: rgba(var(--fg-rgb), 0.62);
+  background: rgba(10, 10, 10, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.86);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -335,8 +335,8 @@ body {
 }
 
 .date-scrollbar-hover-preview.is-current {
-  color: rgba(var(--fg-rgb), 0.48);
-  border-color: rgba(var(--fg-rgb), 0.08);
+  color: rgba(255, 255, 255, 0.64);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 #container {
@@ -2623,11 +2623,6 @@ body {
 [data-theme="light"] .date-scrollbar.is-dragging .date-scrollbar-track,
 [data-theme="light"] .date-scrollbar:focus-visible .date-scrollbar-track {
   background: rgba(0, 0, 0, 0.24);
-}
-
-[data-theme="light"] .date-scrollbar-dot.hovered {
-  background: rgba(0, 0, 0, 0.56);
-  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="light"] .date-scrollbar-hover-preview {

@@ -312,7 +312,6 @@ const renderDateDots = () => {
   for (const month of dateRail.months) {
     const dot = document.createElement("span");
     dot.className = "date-scrollbar-dot";
-    dot.title = month.label;
     const progress = month.index / (dateRail.months.length - 1);
     dot.style.setProperty("--date-dot-progress", String(progress));
     dateRail.dots.appendChild(dot);
@@ -361,7 +360,7 @@ const updateActiveDate = (index) => {
 
   dateRail.root.setAttribute("aria-valuenow", String(dateRail.activeIndex + 1));
   dateRail.root.setAttribute("aria-valuetext", month.label);
-  dateRail.root.title = month.label;
+  dateRail.root.removeAttribute("title");
 
   if (dateRail.dots) {
     dateRail.dots.querySelectorAll(".date-scrollbar-dot").forEach((dot, dotIndex) => {
